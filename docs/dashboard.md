@@ -10,10 +10,16 @@ generator refuses the route otherwise; fail-closed).
 
 - **Header**: title; `<N> published services`; `updated <ISO timestamp>`
   (`yyyy-mm-dd HH:MM:SS +HH:MM`, viewer's timezone); monitor auth mode.
-- **Infrastructure** — always the first section; foldable; count in header.
+- **Infrastructure** — always the first section; foldable; count in header;
+  carries a **global 🟢/🔴 switch** (all infra off/on, multiplied over the
+  per-entry toggles).
 - **Domain sections** — one per domain actually in use, config order
   (base first), header shows the domain + app count, foldable with
-  per-domain state persisted in `localStorage` (`pmp-fold-<domain>`).
+  per-domain state persisted in `localStorage` (`pmp-fold-<domain>`); each
+  header also carries a **global 🟢/🔴 domain switch** — switching a domain
+  off grays all its cards without touching individual toggles
+  (`overrides.json` `domains_off`; the snapshot exposes `domains_off` /
+  `infra_off`).
 - Cards: hostname link, app name, guest + clickable `ip:port` chip, status
   chips (`⚠ stale — port closed`, `⏸ disabled`), status dot button.
 
