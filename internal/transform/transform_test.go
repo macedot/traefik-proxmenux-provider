@@ -1,9 +1,9 @@
 package transform
 
 import (
+	"net"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
@@ -17,27 +17,37 @@ func base() *config.Config {
 	return cfg
 }
 
-func watch(name, via string, port int) proxmenux.Watch {
+func watch(name string, port int) proxmenux.Watch {
 	return proxmenux.Watch{
-		ID: name, Name: name, InstalledVia: via,
+		ID: name, Name: name, InstalledVia: "oci_image",
 		Ports: []proxmenux.Port{{Port: port, Scheme: "http", WebPath: "/"}},
 	}
 }
 
-func guest(vmid int, name, ip, status string, watches ...proxmenux.Watch) proxmenux.Guest {
+func guest(vmid int, name, gtype, ip, status string, watches ...proxmenux.Watch) proxmenux.Guest {
 	return proxmenux.Guest{
-		VMID: vmid, Name: name, IP: ip, Status: status,
+		VMID: vmid, Name: name, Type: gtype, IP: ip, Status: status,
 		Tags: "oci;proxmenux", AppWatches: watches,
 	}
 }
 
+func openPort(t *testing.T) (port int, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	return ln.Addr().(*net.TCPAddr).Port, func() { ln.Close() }
+}
+
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"AdGuard Home":      "adguard-home",
-		"  Jellystat!!  ":   "jellystat",
-		"Over seas__Errand": "over-seas-errand",
-		"---weird---":       "weird",
-		"Ünïcode Thing":     "n-code-thing",
+		"AdGuard Home":       "adguard-home",
+		"  Jellystat!!  ":    "jellystat",
+		"Over seas__Errand":  "over-seas-errand",
+		"---weird---":        "weird",
+		"Ünïcode Thing":      "n-code-thing",
+		"reclip-dashboard-1": "reclip-dashboard-1",
 	}
 	for in, want := range cases {
 		if got := Slugify(in); got != want {
@@ -46,28 +56,18 @@ func TestSlugify(t *testing.T) {
 	}
 	long := strings.Repeat("a", 80) + "-z"
 	if got := Slugify(long); len(got) != 63 || strings.HasSuffix(got, "-") {
-		t.Errorf("Slugify(long) len=%d suffix=%q; want 63 chars, no trailing dash", len(got), got)
+		t.Errorf("Slugify(long) len=%d; want 63 chars, no trailing dash", len(got))
 	}
-}
-
-// openPort starts a TCP listener on a random local port for probe tests.
-func openPort(t *testing.T) (host string, port int, cleanup func()) {
-	t.Helper()
-	ln, err := listenLocal()
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	return "127.0.0.1", ln.Addr().(*tcpAddr).Port, func() { ln.Close() }
 }
 
 func TestTransformHappyPath(t *testing.T) {
-	host, port, stop := openPort(t)
+	port, stop := openPort(t)
 	defer stop()
 
 	cfg := base()
-	g := guest(100, "adguard", host, "running", watch("AdGuard Home", "oci_image", port))
-	g.IP = host
-	res := Transform([]proxmenux.Guest{g}, cfg)
+	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
+	g := guest(100, "adguard", "lxc", "127.0.0.1", "running", watch("AdGuard Home", port))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 
 	if len(res.Routes) != 1 {
 		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
@@ -79,38 +79,70 @@ func TestTransformHappyPath(t *testing.T) {
 	if r.Target != "http://127.0.0.1:"+itoa(port) {
 		t.Errorf("target = %s", r.Target)
 	}
-	if r.VMID != 100 || r.GuestName != "adguard" {
-		t.Errorf("vmid/guest = %d/%s", r.VMID, r.GuestName)
+	if r.Stale || !r.Served || r.Kind != "app" {
+		t.Errorf("flags wrong: %+v", r)
 	}
 	if len(res.Skipped) != 0 {
 		t.Errorf("skipped = %+v", res.Skipped)
 	}
 }
 
-func TestTransformSkips(t *testing.T) {
+func TestVmsAreSkippedSilently(t *testing.T) {
 	cfg := base()
-	cfg.ProxMenux.Source = "oci" // exercise the OCI filter explicitly
+	cfg.Routing.Probe = false
+	g := guest(400, "algo", "qemu", "127.0.0.1", "running", watch("ALGO", 80))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
+	if len(res.Routes) != 0 || len(res.Skipped) != 0 {
+		t.Fatalf("vm guest must be ignored: %+v %+v", res.Routes, res.Skipped)
+	}
+}
+
+func TestStaleIsTaggedNotDropped(t *testing.T) {
+	cfg := base()
+	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
+	g := guest(117, "dead", "lxc", "127.0.0.1", "running", watch("Dead App", 1))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
+	if len(res.Routes) != 1 {
+		t.Fatalf("stale route must stay visible: %+v", res.Skipped)
+	}
+	if !res.Routes[0].Stale || res.Routes[0].Served {
+		t.Errorf("stale flags wrong: %+v", res.Routes[0])
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("stale must not be a skip: %+v", res.Skipped)
+	}
+}
+
+func TestProbeDisabledServesEverything(t *testing.T) {
+	cfg := base()
+	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
+	cfg.Routing.Probe = false
+	g := guest(117, "dead", "lxc", "127.0.0.1", "running", watch("Dead App", 1))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
+	if len(res.Routes) != 1 || res.Routes[0].Stale || !res.Routes[0].Served {
+		t.Fatalf("probe off: %+v", res.Routes)
+	}
+}
+
+func TestSkipReasons(t *testing.T) {
+	cfg := base()
 	guests := []proxmenux.Guest{
-		guest(113, "plex", "10.0.0.9", "stopped", watch("Plex", "oci_image", 32400)),                         // not running
-		guest(114, "noip", "", "running", watch("NoIP", "oci_image", 80)),                                    // no IP
-		guest(115, "nolabel", "10.0.0.10", "running", watch("Sidecar", "user_sidecar", 80)),                  // not oci
-		guest(116, "noports", "10.0.0.11", "running", proxmenux.Watch{Name: "X", InstalledVia: "oci_image"}), // no ports
-		guest(117, "dead", "127.0.0.1", "running", watch("Dead App", "oci_image", 1)),                        // probe fails
+		guest(113, "plex", "lxc", "10.0.0.9", "stopped", watch("Plex", 32400)),
+		guest(116, "noports", "lxc", "10.0.0.11", "running", proxmenux.Watch{Name: "X", InstalledVia: "oci_image"}),
 	}
-	res := Transform(guests, cfg)
+	res := Transform(guests, nil, cfg)
 	if len(res.Routes) != 0 {
-		t.Errorf("routes = %d, want 0", len(res.Routes))
+		t.Fatalf("routes = %d, want 0", len(res.Routes))
 	}
-	if len(res.Skipped) != 5 {
-		t.Fatalf("skipped = %d, want 5: %+v", len(res.Skipped), res.Skipped)
+	if len(res.Skipped) != 2 {
+		t.Fatalf("skipped = %d, want 2: %+v", len(res.Skipped), res.Skipped)
 	}
 	reasons := map[int]string{}
 	for _, s := range res.Skipped {
 		reasons[s.VMID] = s.Reason
 	}
 	for vmid, frag := range map[int]string{
-		113: "not running", 114: "no IP", 115: "not an OCI-managed",
-		116: "no catalog ports", 117: "probe failed",
+		113: "not running", 116: "no discoverable ports",
 	} {
 		if !strings.Contains(reasons[vmid], frag) {
 			t.Errorf("vmid %d reason = %q, want substring %q", vmid, reasons[vmid], frag)
@@ -118,109 +150,107 @@ func TestTransformSkips(t *testing.T) {
 	}
 }
 
-func TestTransformCollisionDedupe(t *testing.T) {
+func TestCollisionDedupe(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
-	g1 := guest(100, "a1", "127.0.0.1", "running", watch("Same App", "oci_image", 80))
-	g2 := guest(200, "a2", "127.0.0.1", "running", watch("Same App", "oci_image", 80))
-	res := Transform([]proxmenux.Guest{g1, g2}, cfg)
+	g1 := guest(100, "a1", "lxc", "10.0.0.1", "running", watch("Same App", 80))
+	g2 := guest(200, "a2", "lxc", "10.0.0.2", "running", watch("Same App", 80))
+	res := Transform([]proxmenux.Guest{g1, g2}, nil, cfg)
 	if len(res.Routes) != 2 {
 		t.Fatalf("routes = %d, want 2", len(res.Routes))
 	}
-	if res.Routes[0].Slug != "same-app" || res.Routes[1].Slug != "same-app-200" {
-		t.Errorf("slugs = %q, %q", res.Routes[0].Slug, res.Routes[1].Slug)
+	slugs := map[string]bool{}
+	for _, r := range res.Routes {
+		slugs[r.Slug] = true
+	}
+	if !slugs["same-app"] || !slugs["same-app-200"] {
+		t.Errorf("slugs = %v, want same-app + same-app-200", slugs)
 	}
 }
 
-func TestTransformVMIDSuffix(t *testing.T) {
+func TestDiscoveryExtrasAndIPPortDedupe(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
-	cfg.Domain.IncludeVMIDSuffix = true
-	g := guest(100, "a", "127.0.0.1", "running", watch("App", "oci_image", 80))
-	res := Transform([]proxmenux.Guest{g}, cfg)
-	if res.Routes[0].Slug != "app-100" {
-		t.Errorf("slug = %q, want app-100", res.Routes[0].Slug)
+	// Guest with no app watch, discovered via docker discovery (ProxDnx
+	// reports such guests — e.g. dockhand).
+	extras := map[int][]ServicePort{
+		193: {{Name: "dockhand", Port: 3000, Scheme: "http", Source: "docker"}},
+	}
+	g := guest(193, "docker", "lxc", "10.0.0.193", "running")
+	res := Transform([]proxmenux.Guest{g}, extras, cfg)
+	if len(res.Routes) != 1 || res.Routes[0].Slug != "dockhand" {
+		t.Fatalf("discovery route wrong: %+v", res.Routes)
+	}
+
+	// Watch port + duplicate discovery entry for the same ip:port → one route.
+	g2 := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 8080))
+	extras[100] = []ServicePort{{Name: "AdGuard Home", Port: 8080, Scheme: "http", Source: "docker"}}
+	res2 := Transform([]proxmenux.Guest{g2}, extras, cfg)
+	if len(res2.Routes) != 1 {
+		t.Fatalf("ip:port dedupe failed: %+v", res2.Routes)
 	}
 }
 
-func TestTransformAllowDeny(t *testing.T) {
+func TestAllowDenyAndReserved(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
 	cfg.Expose.Deny = []string{"secret-app"}
-	g := guest(100, "a", "127.0.0.1", "running",
-		watch("Secret App", "oci_image", 80),
-		watch("Public App", "oci_image", 80))
-	res := Transform([]proxmenux.Guest{g}, cfg)
+	g := guest(100, "a", "lxc", "10.0.0.1", "running",
+		watch("Secret App", 80), watch("Public App", 80))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Slug != "public-app" {
-		t.Fatalf("routes = %+v", res.Routes)
+		t.Fatalf("deny routes = %+v", res.Routes)
 	}
 
 	cfg2 := base()
 	cfg2.Routing.Probe = false
 	cfg2.Expose.Allow = []string{"public-app"}
-	res2 := Transform([]proxmenux.Guest{g}, cfg2)
+	res2 := Transform([]proxmenux.Guest{g}, nil, cfg2)
 	if len(res2.Routes) != 1 || res2.Routes[0].Slug != "public-app" {
-		t.Fatalf("allow-list routes = %+v", res2.Routes)
+		t.Fatalf("allow routes = %+v", res2.Routes)
+	}
+
+	cfg3 := base()
+	cfg3.Routing.Probe = false
+	cfg3.Dashboard.ViaTraefik = true
+	cfg3.Dashboard.Hostname = "provider"
+	g3 := guest(100, "a", "lxc", "10.0.0.1", "running", watch("Provider", 8081))
+	res3 := Transform([]proxmenux.Guest{g3}, nil, cfg3)
+	if len(res3.Routes) != 0 || !strings.Contains(res3.Skipped[0].Reason, "reserved") {
+		t.Fatalf("reserved hostname: %+v %+v", res3.Routes, res3.Skipped)
 	}
 }
 
-func TestTransformReservedHostname(t *testing.T) {
-	cfg := base()
-	cfg.Dashboard.ViaTraefik = true
-	cfg.Dashboard.Hostname = "provider"
-	g := guest(100, "a", "127.0.0.1", "running", watch("Provider", "oci_image", 8081))
-	res := Transform([]proxmenux.Guest{g}, cfg)
-	if len(res.Routes) != 0 {
-		t.Fatalf("reserved hostname published: %+v", res.Routes)
-	}
-	if len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Reason, "reserved") {
-		t.Fatalf("skip reason = %+v", res.Skipped)
-	}
-}
-
-func TestTransformSlugOverride(t *testing.T) {
+func TestSlugOverrideAndHostnameSource(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
 	cfg.Domain.SlugOverrides = map[string]string{"AdGuard Home": "dns"}
-	g := guest(100, "adguard", "127.0.0.1", "running", watch("AdGuard Home", "oci_image", 80))
-	res := Transform([]proxmenux.Guest{g}, cfg)
+	g := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 80))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 	if res.Routes[0].Slug != "dns" {
-		t.Errorf("slug = %q, want dns", res.Routes[0].Slug)
+		t.Errorf("override slug = %q, want dns", res.Routes[0].Slug)
 	}
-}
 
-func TestTransformHostnameSource(t *testing.T) {
-	cfg := base()
-	cfg.Routing.Probe = false
-	cfg.Domain.SlugSource = "hostname"
-	g := guest(100, "adguard", "127.0.0.1", "running", watch("AdGuard Home", "oci_image", 80))
-	res := Transform([]proxmenux.Guest{g}, cfg)
-	if res.Routes[0].Slug != "adguard" {
-		t.Errorf("slug = %q, want adguard (hostname source)", res.Routes[0].Slug)
-	}
-}
-
-func TestTransformProbeDisabled(t *testing.T) {
-	cfg := base()
-	cfg.Routing.Probe = false
-	cfg.Routing.ProbeTimeout = config.Duration(100 * time.Millisecond)
-	g := guest(117, "dead", "127.0.0.1", "running", watch("Dead App", "oci_image", 1))
-	res := Transform([]proxmenux.Guest{g}, cfg)
-	if len(res.Routes) != 1 {
-		t.Fatalf("probe disabled should publish: %+v", res.Skipped)
+	cfg2 := base()
+	cfg2.Routing.Probe = false
+	cfg2.Domain.SlugSource = "hostname"
+	g2 := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 80))
+	res2 := Transform([]proxmenux.Guest{g2}, nil, cfg2)
+	if res2.Routes[0].Slug != "adguard" {
+		t.Errorf("hostname-source slug = %q, want adguard", res2.Routes[0].Slug)
 	}
 }
 
 func TestPickIPPrefersLanSubnet(t *testing.T) {
-	_, port, stop := openPort(t)
+	port, stop := openPort(t)
 	defer stop()
 
 	cfg := base()
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
 	// Arr-style guest: monitor reports the VPN IP first, LAN IP second.
-	g := guest(109, "qbittorrent", "198.51.100.33", "running", watch("Qbittorrent", "oci_image", port))
+	g := guest(109, "qbittorrent", "lxc", "198.51.100.33", "running", watch("Qbittorrent", port))
 	g.IPs = []string{"127.0.0.1", "198.51.100.33"}
-	res := Transform([]proxmenux.Guest{g}, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 	if len(res.Routes) != 1 {
 		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
 	}
@@ -229,26 +259,58 @@ func TestPickIPPrefersLanSubnet(t *testing.T) {
 	}
 }
 
-func TestPickIPFallsBackToFirst(t *testing.T) {
+func TestPickIPFallsBackToUsable(t *testing.T) {
 	cfg := base()
-	cfg.Routing.Probe = false // target unreachable; only liveness of the pick matters
-	g := guest(115, "byparr", "198.51.100.39", "running", watch("FlareSolverr", "oci_image", 8191))
+	cfg.Routing.Probe = false
+	g := guest(115, "byparr", "lxc", "198.51.100.39", "running", watch("FlareSolverr", 8191))
 	g.IPs = []string{"198.51.100.39"}
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
-	res := Transform([]proxmenux.Guest{g}, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].IP != "198.51.100.39" {
 		t.Fatalf("fallback pick wrong: %+v", res.Routes)
 	}
 }
 
-func TestSidecarsIncludedInWatchesMode(t *testing.T) {
-	host, port, stop := openPort(t)
-	defer stop()
-
-	cfg := base() // default source = watches
-	g := guest(111, "sonarr", host, "running", watch("Sonarr", "user_sidecar", port))
-	res := Transform([]proxmenux.Guest{g}, cfg)
+func TestSidecarsAreReported(t *testing.T) {
+	cfg := base() // no source filter: sidecars are reported like ProxDnx
+	cfg.Routing.Probe = false
+	g := guest(111, "sonarr", "lxc", "10.0.0.150", "running", watch("Sonarr", 8989))
+	res := Transform([]proxmenux.Guest{g}, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Slug != "sonarr" {
-		t.Fatalf("sidecar not published in watches mode: %+v (%+v)", res.Routes, res.Skipped)
+		t.Fatalf("sidecar not reported: %+v (%+v)", res.Routes, res.Skipped)
+	}
+}
+
+func TestBuildInfraRoutes(t *testing.T) {
+	cfg := base()
+	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99")
+	if len(infra) != 4 {
+		t.Fatalf("infra routes = %d, want 4", len(infra))
+	}
+	want := map[string]string{
+		"pve-host.home.example.com":       "https://192.0.2.99:8006",
+		"pve-host.menux.home.example.com": "http://192.0.2.99:8008",
+		"menux.home.example.com":       "http://192.0.2.99:8008",
+		"proxmenux.home.example.com":   "http://192.0.2.99:8008",
+	}
+	for _, r := range infra {
+		if want[r.Hostname] != r.Target {
+			t.Errorf("%s -> %s, want %s", r.Hostname, r.Target, want[r.Hostname])
+		}
+		if r.Kind != "infra" || !r.Served {
+			t.Errorf("infra flags wrong: %+v", r)
+		}
+	}
+	if !infra[0].Insecure {
+		t.Errorf("PVE route must be insecure-skip-verify (self-signed)")
+	}
+
+	if BuildInfraRoutes(cfg, "", "1.2.3.4") != nil {
+		t.Error("empty host must yield nil")
+	}
+	off := *cfg
+	off.Infra.Enabled = false
+	if BuildInfraRoutes(&off, "pve-host", "1.2.3.4") != nil {
+		t.Error("infra disabled must yield nil")
 	}
 }

@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -114,6 +116,36 @@ func main() {
 			return err
 		}
 
+		// ProxDnx parity: docker/native discovery ports per guest.
+		extras := map[int][]transform.ServicePort{}
+		var dmu sync.Mutex
+		var dwg sync.WaitGroup
+		dsem := make(chan struct{}, 8)
+		for i := range guests {
+			g := guests[i]
+			if g.Status != "running" || (g.Type != "" && g.Type != "lxc") {
+				continue
+			}
+			dwg.Add(1)
+			go func(g proxmenux.Guest) {
+				defer dwg.Done()
+				dsem <- struct{}{}
+				defer func() { <-dsem }()
+				ports := client.DiscoveryPorts(ctx, g.VMID)
+				if len(ports) == 0 {
+					return
+				}
+				sps := make([]transform.ServicePort, 0, len(ports))
+				for _, d := range ports {
+					sps = append(sps, transform.ServicePort{Name: d.Name, Port: d.Port, Scheme: "http", WebPath: "/", Source: d.Source})
+				}
+				dmu.Lock()
+				extras[g.VMID] = sps
+				dmu.Unlock()
+			}(g)
+		}
+		dwg.Wait()
+
 		// Dashboard edits (overrides file) win over config slug_overrides.
 		if ov, oerr := store.Load(); oerr != nil {
 			logger.Warn("overrides load failed", "err", oerr)
@@ -127,7 +159,26 @@ func main() {
 			}
 			cfg.Domain.SlugOverrides = merged
 		}
-		result := transform.Transform(guests, cfg)
+		result := transform.Transform(guests, extras, cfg)
+
+		// Static infra entries (ProxDnx parity): <host> (PVE UI) and the
+		// ProxMenux UI names, derived from the monitor hostname + api host.
+		if cfg.Infra.Enabled {
+			if host, herr := client.SystemHostname(ctx); herr == nil {
+				if u, perr := url.Parse(cfg.ProxMenux.APIURL); perr == nil {
+					infra := transform.BuildInfraRoutes(cfg, host, u.Hostname())
+					if cfg.Routing.Probe {
+						for i := range infra {
+							transform.ProbeRoute(&infra[i], cfg.Routing.ProbeTimeout.Std())
+						}
+					}
+					result.Routes = append(infra, result.Routes...)
+				}
+			} else {
+				logger.Warn("infra entries skipped", "err", herr)
+			}
+		}
+
 		doc, err := generate.Render(result.Routes, cfg)
 		if err != nil {
 			snap.LastError = err.Error()
@@ -157,7 +208,6 @@ func main() {
 		}
 
 		snap.Domain = cfg.Domain.Base
-		snap.Source = cfg.ProxMenux.Source
 		snap.TLSMode = cfg.TLS.Mode
 		snap.Entrypoint = cfg.Routing.Entrypoint
 		snap.AuthMode = string(authMode)

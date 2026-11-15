@@ -35,7 +35,9 @@
   .editinp { background:#0f1115; color:var(--fg); border:1px solid var(--acc); border-radius:6px; padding:4px 8px; font:13px ui-monospace,SFMono-Regular,Menlo,monospace; width:180px; }
   .editrow button { background:#1d222c; color:var(--fg); border:1px solid var(--bd); border-radius:6px; padding:4px 10px; margin-left:6px; font-size:12px; cursor:pointer; }
   .editrow button:hover { border-color:var(--acc); }
-  tr.editing td { background:#1b2029; }
+  .chip { display:inline-block; background:#1d222c; border:1px solid var(--bd); border-radius:6px; padding:1px 7px; font-size:11.5px; color:var(--mut); }
+  .chip.bad { color:var(--bad); border-color:var(--bad); }
+  tr.dim td { opacity:.55; }
 </style>
 </head>
 <body>
@@ -86,12 +88,17 @@ async function refresh() {
 
     const rows = [];
     for (const r of s.routes || []) {
-      const edit = s.edit_enabled;
-      rows.push(`<tr data-vmid="${r.vmid}" tabindex="0" title="${edit ? "double-click (or Enter/F2) to edit the URL" : ""}">` +
-        `<td class="name"><b>${esc(r.app_name)}</b><span>vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
+      const edit = s.edit_enabled && r.kind === "app" && !r.stale;
+      const dim = r.stale ? " dim" : "";
+      const status = r.stale
+        ? `<span class="chip bad">⚠ stale — port closed</span>`
+        : `<span class="status-ok">✓ published</span>`;
+      const kindChip = r.kind === "infra" ? `<span class="chip">static</span>` : "";
+      rows.push(`<tr data-vmid="${r.vmid}" tabindex="0" class="${dim.trim()}" title="${edit ? "double-click (or Enter/F2) to edit the URL" : ""}">` +
+        `<td class="name"><b>${esc(r.app_name)}</b><span>${kindChip} vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
         `<td class="urlcell"><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener">https://${esc(r.hostname)}</a></td>` +
         `<td class="mono">${esc(r.target)}</td>` +
-        `<td class="status-ok">✓ published</td></tr>`);
+        `<td>${status}</td></tr>`);
     }
     for (const k of s.skipped || []) {
       rows.push(`<tr><td class="name"><b>${esc(k.app_name)}</b><span>vmid ${k.vmid} · ${esc(k.guest_name)}</span></td>` +
@@ -104,7 +111,7 @@ async function refresh() {
     tbody.innerHTML = rows.join("");
     if (s.edit_enabled) {
       tbody.querySelectorAll("tr[data-vmid]").forEach(tr => {
-        const r = (s.routes || []).find(x => x.vmid === parseInt(tr.dataset.vmid, 10));
+        const r = (s.routes || []).find(x => x.vmid === parseInt(tr.dataset.vmid, 10) && x.kind === "app" && !x.stale);
         if (r) { wireEdit(tr, r); }
       });
     }

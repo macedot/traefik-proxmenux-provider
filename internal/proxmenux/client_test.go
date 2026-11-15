@@ -22,7 +22,6 @@ func testCfg(pc func(*config.ProxMenux)) config.ProxMenux {
 		APIURL:           "http://placeholder",
 		Timeout:          config.Duration(2 * time.Second),
 		MaxResponseBytes: 64 * 1024,
-		Source:           "oci",
 	}
 	if pc != nil {
 		pc(&pc2)

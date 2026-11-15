@@ -25,11 +25,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.TLS.Mode != "internal" {
 		t.Errorf("tls.mode default = %q, want internal", cfg.TLS.Mode)
 	}
-	if cfg.ProxMenux.Source != "watches" {
-		t.Errorf("proxmenux.source default = %q, want watches", cfg.ProxMenux.Source)
-	}
 	if cfg.Routing.Probe != true {
 		t.Error("routing.probe must default to true")
+	}
+	if cfg.Infra.Enabled != true {
+		t.Error("infra must default to enabled")
+	}
+	if cfg.Dashboard.Edit != true {
+		t.Error("dashboard.edit must default to enabled")
 	}
 }
 
@@ -69,7 +72,6 @@ func TestValidateErrors(t *testing.T) {
 		{"bad scheme", "proxmenux:\n  api_url: ftp://h:8008\ndomain:\n  base: home.example.com\n", "api_url"},
 		{"low poll", "provider:\n  poll_interval: \"5s\"\n" + string(baseCfg()), "poll_interval"},
 		{"bad level", "provider:\n  log_level: verbose\n" + string(baseCfg()), "log_level"},
-		{"bad source", "proxmenux:\n  api_url: http://h:8008\n  source: none\ndomain:\n  base: home.example.com\n", "source"},
 		{"single-label domain", "proxmenux:\n  api_url: http://h:8008\ndomain:\n  base: localhost\n", "domain.base"},
 		{"per-app no email", "proxmenux:\n  api_url: http://h:8008\ndomain:\n  base: home.example.com\ntls:\n  mode: per-app\n", "tls.email"},
 		{"wildcard no dns", "proxmenux:\n  api_url: http://h:8008\ndomain:\n  base: home.example.com\ntls:\n  mode: wildcard\n  email: a@b.c\n", "dns_provider"},
@@ -78,6 +80,7 @@ func TestValidateErrors(t *testing.T) {
 		{"bad octal", string(baseCfg()) + "output:\n  mode: 999\n", "output.mode"},
 		{"bad listen", string(baseCfg()) + "dashboard:\n  listen: \":99999\"\n", "dashboard.listen"},
 		{"bad cidr", string(baseCfg()) + "dashboard:\n  via_traefik: true\n  allow_cidrs: [\"10.0.0.0/99\"]\n", "allow_cidrs"},
+		{"bad lan_cidr", "proxmenux:\n  api_url: http://h:8008\n  lan_cidr: \"10.0.0\"\ndomain:\n  base: home.example.com\n", "lan_cidr"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

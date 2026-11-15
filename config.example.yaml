@@ -18,14 +18,9 @@ proxmenux:
   #   this when ProxMenux monitor auth is enabled; leave unset when not.
   timeout: 10s                # per-request timeout
   max_response_bytes: 5242880 # response size cap (5 MiB)
-  source: watches             # which guests may become routes:
-                              #   watches = ProxMenux OCI apps + user sidecars (default)
-                              #   oci     = OCI-managed apps only
-                              #   all     = every guest with any app watch
   # lan_cidr: 10.0.0.0/24     # prefer guest IPs in this subnet; default: the
                               # provider CT's own /24 (guests behind gluetun/VPN
-                              # report the VPN IP first — unreachable targets
-                              # are probed out instead)
+                              # report the VPN IP first — stale-tagged instead)
 
 domain:
   base: home.example.com      # REQUIRED: every app becomes <slug>.base
@@ -78,6 +73,12 @@ dashboard:
                               # overrides.json next to the config)
   # hostname: provider        # subdomain when via_traefik: true
   # allow_cidrs: ["192.0.2.0/25"]
+
+infra:
+  enabled: true               # static entries on the provider domain
+                              # (ProxDnx parity): <host>.<domain> -> Proxmox UI
+                              # :8006, <host>.menux.<domain> + menux.<domain> +
+                              # proxmenux.<domain> -> ProxMenux UI :8008
 
 output:
   file: /etc/traefik/conf.d/proxmenux-generated.yaml

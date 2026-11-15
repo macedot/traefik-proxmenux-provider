@@ -1,6 +1,9 @@
-// Package transform turns monitor-API guests into provider routes:
-// slug rules, collision dedupe, allow/deny, reserved hostnames, and the
-// TCP reachability probe that keeps dead or drifted watches unpublished.
+// Package transform turns monitor-API guests into provider routes,
+// replicating ProxDnx's reporting semantics exactly:
+//   - running LXC guests only
+//   - ports = app_watches + docker/native discovery candidates
+//   - IP picked subnet-first, then first non-excluded IPv4
+//   - probe TAGS staleness (stale routes stay visible, just not served)
 package transform
 
 import (
@@ -10,28 +13,33 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
 )
 
-// Route is one publishable app route.
+// Route is one app/infra route.
 type Route struct {
 	Slug       string `json:"slug"`
-	Hostname   string `json:"hostname"` // "adguard-home.home.example.com"
-	AppName    string `json:"app_name"` // "AdGuard Home" (display)
+	Hostname   string `json:"hostname"`
+	AppName    string `json:"app_name"`
+	Kind       string `json:"kind"` // app | infra
 	VMID       int    `json:"vmid"`
 	GuestName  string `json:"guest_name"`
 	IP         string `json:"ip"`
-	Target     string `json:"target"` // "http://192.0.2.2:3000"
+	Target     string `json:"target"`
 	Scheme     string `json:"scheme"`
 	Port       int    `json:"port"`
 	WebPath    string `json:"web_path"`
-	HealthPath string `json:"health_path"` // "" = none
+	HealthPath string `json:"health_path"`
+	Stale      bool   `json:"stale"`    // TCP probe failed: shown, not served
+	Insecure   bool   `json:"insecure"` // https backend with self-signed cert (PVE UI)
+	Served     bool   `json:"served"`   // published to the generated Traefik config
 }
 
-// Skipped records why an app watch was not published (shown on the dashboard).
+// Skipped records why a port/watch was not turned into a route.
 type Skipped struct {
 	VMID      int    `json:"vmid"`
 	GuestName string `json:"guest_name"`
@@ -46,9 +54,20 @@ type Result struct {
 	Skipped []Skipped
 }
 
+// ServicePort is one discoverable service port of a guest (watch port or
+// discovery candidate).
+type ServicePort struct {
+	Name       string
+	Port       int
+	Scheme     string
+	WebPath    string
+	HealthPath string
+	Source     string // app_watch | docker | native (dedupe/debug)
+}
+
 var slugNoise = regexp.MustCompile(`[^a-z0-9]+`)
 
-// Slugify converts an app name to a DNS-safe label.
+// Slugify converts a service name to a DNS-safe label.
 func Slugify(name string) string {
 	s := slugNoise.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-")
 	s = strings.Trim(s, "-")
@@ -59,7 +78,7 @@ func Slugify(name string) string {
 }
 
 // ReservedHostnames returns hostnames (lowercase, full label) that app
-// routes must not claim because they belong to dashboards.
+// routes must not claim: dashboards and the static infra names.
 func ReservedHostnames(cfg *config.Config) map[string]bool {
 	res := map[string]bool{}
 	if cfg.Dashboard.Enabled && cfg.Dashboard.ViaTraefik {
@@ -68,18 +87,21 @@ func ReservedHostnames(cfg *config.Config) map[string]bool {
 	if cfg.Expose.TraefikDashboard.Enabled {
 		res[strings.ToLower(cfg.Expose.TraefikDashboard.Hostname)] = true
 	}
+	if cfg.Infra.Enabled {
+		res["menux"] = true
+		res["proxmenux"] = true
+	}
 	return res
 }
 
-// Transform filters guests and app watches into publishable routes.
-// It is pure except for the optional TCP probe.
-func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
+// Transform filters guests and service ports into routes (ProxDnx
+// semantics). Stale routes are flagged, never silently dropped.
+func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, cfg *config.Config) *Result {
 	res := &Result{}
 	reserved := ReservedHostnames(cfg)
 
 	allow := toSet(cfg.Expose.Allow)
 	deny := toSet(cfg.Expose.Deny)
-	source := cfg.ProxMenux.Source
 
 	sorted := append([]proxmenux.Guest(nil), guests...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].VMID < sorted[j].VMID })
@@ -88,7 +110,8 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 		route Route
 	}
 	var candidates []candidate
-	seenSlug := map[string]bool{}
+	seenHost := map[string]bool{}
+	seenIPPort := map[string]bool{}
 
 	for _, g := range sorted {
 		if g.Status != "running" {
@@ -97,45 +120,47 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 			}
 			continue
 		}
-		if strings.TrimSpace(g.IP) == "" && len(g.IPs) == 0 {
+		// ProxDnx parity: LXC guests only (VMs are not reported).
+		if g.Type != "" && g.Type != "lxc" {
+			continue
+		}
+		gip := pickIP(g, cfg)
+		if gip == "" {
+			continue
+		}
+
+		ports := mergePorts(g, extras[g.VMID])
+		if len(ports) == 0 {
 			for _, w := range g.AppWatches {
-				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: w.Name, Reason: "no IP reported by monitor"})
+				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: w.Name, Reason: "no discoverable ports"})
 			}
 			continue
 		}
-		for _, w := range g.AppWatches {
+
+		for _, sp := range ports {
 			skip := func(reason string) {
-				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: w.Name, Reason: reason})
+				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: sp.Name, Reason: reason})
 			}
 
-			if source == "oci" && w.InstalledVia != "oci_image" {
-				skip("not an OCI-managed app (source=oci)")
-				continue
-			}
-			if len(w.Ports) == 0 {
-				skip("no catalog ports")
+			// ProxDnx parity: one record per unique ip:port.
+			if seenIPPort[gip+":"+strconv.Itoa(sp.Port)] {
 				continue
 			}
 
-			slug := resolveSlug(w, g, cfg)
+			slug := resolveSlug(sp.Name, g, cfg)
 			if slug == "" {
-				slug = fmt.Sprintf("app-%d", g.VMID)
+				continue
 			}
-
-			// Dedupe: on collision append the vmid (unique per guest).
-			if seenSlug[slug] {
-				slug = fmt.Sprintf("%s-%d", slug, g.VMID)
+			hostname := slug
+			if seenHost[hostname] {
+				hostname = fmt.Sprintf("%s-%d", slug, g.VMID)
 			}
-			if seenSlug[slug] {
+			if seenHost[hostname] {
 				skip("slug collision")
 				continue
 			}
-			if cfg.Domain.IncludeVMIDSuffix {
-				slug = fmt.Sprintf("%s-%d", slug, g.VMID)
-			}
-			seenSlug[slug] = true
+			seenHost[hostname] = true
 
-			// Exposure control by slug (deny wins over allow).
 			if deny[strings.ToLower(slug)] {
 				skip("denied by expose.deny")
 				continue
@@ -144,81 +169,205 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 				skip("not in expose.allow")
 				continue
 			}
-
 			if reserved[strings.ToLower(slug)] {
-				skip("hostname reserved for a dashboard")
+				skip("hostname reserved")
 				continue
 			}
 
-			p := w.Ports[0]
-			gip := pickIP(g, cfg)
 			candidates = append(candidates, candidate{route: Route{
-				Slug:       slug,
-				Hostname:   slug + "." + cfg.Domain.Base,
-				AppName:    w.Name,
-				VMID:       g.VMID,
-				GuestName:  g.Name,
-				IP:         gip,
-				Scheme:     portScheme(p),
-				Port:       p.Port,
-				WebPath:    p.WebPath,
-				HealthPath: healthPath(w),
-				Target:     fmt.Sprintf("%s://%s:%d", portScheme(p), gip, p.Port),
+				Slug:      hostname,
+				Hostname:  hostname + "." + cfg.Domain.Base,
+				AppName:   sp.Name,
+				Kind:      "app",
+				VMID:      g.VMID,
+				GuestName: g.Name,
+				IP:        gip,
+				Scheme:    sp.Scheme,
+				Port:      sp.Port,
+				WebPath:   sp.WebPath,
+				Target:    fmt.Sprintf("%s://%s:%d", sp.Scheme, gip, sp.Port),
 			}})
+			seenIPPort[gip+":"+strconv.Itoa(sp.Port)] = true
 		}
 	}
 
-	// Probe before publish.
-	for _, c := range candidates {
-		r := c.route
-		if cfg.Routing.Probe {
-			if err := probe(r.IP, r.Port, cfg.Routing.ProbeTimeout.Std()); err != nil {
-				res.Skipped = append(res.Skipped, Skipped{
-					VMID: r.VMID, GuestName: r.GuestName, AppName: r.AppName, Slug: r.Slug,
-					Reason: "probe failed (" + err.Error() + ")",
-				})
-				continue
-			}
-		}
-		res.Routes = append(res.Routes, r)
+	// Probe tags staleness (parallel; never drops).
+	var routes []*Route
+	for i := range candidates {
+		routes = append(routes, &candidates[i].route)
 	}
+	probeCandidates(routes, cfg)
+
+	for _, r := range routes {
+		r.Served = !r.Stale
+		res.Routes = append(res.Routes, *r)
+	}
+	sort.Slice(res.Routes, func(i, j int) bool { return res.Routes[i].Hostname < res.Routes[j].Hostname })
 	return res
 }
 
-// pickIP chooses the best target IP for a guest: prefer an address inside
-// the LAN subnet (guests behind gluetun/VPN report the VPN IP first, which
-// is unreachable from the Traefik CT). Falls back to the first reported IP.
+// mergePorts = app_watches ports + per-guest discovery candidates,
+// deduped by name|port (ProxDnx parity).
+func mergePorts(g proxmenux.Guest, extras []ServicePort) []ServicePort {
+	seen := map[string]bool{}
+	var out []ServicePort
+	add := func(sp ServicePort) {
+		if sp.Port == 0 {
+			return
+		}
+		k := sp.Name + "|" + strconv.Itoa(sp.Port)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		if sp.Scheme == "" {
+			sp.Scheme = "http"
+		}
+		out = append(out, sp)
+	}
+	for _, w := range g.AppWatches {
+		name := w.Name
+		if name == "" {
+			name = w.HelperSlug
+		}
+		hp := ""
+		if w.HealthPath != nil {
+			hp = *w.HealthPath
+		}
+		for _, p := range w.Ports {
+			add(ServicePort{Name: name, Port: p.Port, Scheme: portScheme(p.Scheme), WebPath: p.WebPath, HealthPath: hp, Source: "app_watch"})
+		}
+	}
+	for _, sp := range extras {
+		add(sp)
+	}
+	return out
+}
+
+// BuildInfraRoutes builds the static infrastructure routes on the provider
+// domain, mirroring ProxDnx's static entries: <host> (PVE UI :8006) and the
+// ProxMenux UI on <host>.menux / menux / proxmenux (:8008).
+func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
+	if !cfg.Infra.Enabled || host == "" || apiIP == "" {
+		return nil
+	}
+	port := cfg.ProxMenux.MonitorPort()
+	base := "http://" + apiIP + ":" + strconv.Itoa(port)
+	menux := []Route{
+		{Slug: host + "-menux", Hostname: host + ".menux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
+		{Slug: "menux", Hostname: "menux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
+		{Slug: "proxmenux", Hostname: "proxmenux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
+	}
+	pve := Route{Slug: host, Hostname: host + "." + cfg.Domain.Base, AppName: "Proxmox VE", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "https", Port: 8006, Insecure: true,
+		Target: "https://" + apiIP + ":8006"}
+	out := append([]Route{pve}, menux...)
+	for i := range out {
+		out[i].Served = true
+	}
+	return out
+}
+
+// ProbeRoute TCP-probes a route target and updates its staleness.
+func ProbeRoute(r *Route, timeout time.Duration) {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(r.IP, strconv.Itoa(r.Port)), timeout)
+	if err != nil {
+		r.Stale = true
+		r.Served = false
+		return
+	}
+	_ = conn.Close()
+	r.Stale = false
+	r.Served = true
+}
+
+// probeCandidates marks stale routes in parallel (ProxDnx-sized:
+// 1200ms default, 16 workers).
+func probeCandidates(routes []*Route, cfg *config.Config) {
+	if !cfg.Routing.Probe {
+		return
+	}
+	timeout := cfg.Routing.ProbeTimeout.Std()
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for _, r := range routes {
+		wg.Add(1)
+		go func(r *Route) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ProbeRoute(r, timeout)
+		}(r)
+	}
+	wg.Wait()
+}
+
+// pickIP mirrors ProxDnx: IPv4 from ips[] (plus ip), subnet-preferred, then
+// the first IPv4 that is not loopback / CGNAT / docker / link-local.
 func pickIP(g proxmenux.Guest, cfg *config.Config) string {
 	seen := map[string]bool{}
-	var cands []string
+	var v4 []string
 	for _, c := range append([]string{g.IP}, g.IPs...) {
 		c = strings.TrimSpace(c)
-		if c == "" || seen[c] {
+		if c == "" || strings.Contains(c, ":") || seen[c] {
 			continue
 		}
 		seen[c] = true
-		cands = append(cands, c)
+		v4 = append(v4, c)
 	}
-	if len(cands) == 0 {
+	if len(v4) == 0 {
 		return ""
 	}
 	if cidr := strings.TrimSpace(cfg.ProxMenux.LANResolved); cidr != "" {
 		if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
-			for _, c := range cands {
+			for _, c := range v4 {
 				if ip := net.ParseIP(c); ip != nil && ipnet.Contains(ip) {
 					return c
 				}
 			}
 		}
 	}
-	return cands[0]
+	for _, c := range v4 {
+		if !excludedIP(c) {
+			return c
+		}
+	}
+	return ""
 }
 
-func resolveSlug(w proxmenux.Watch, g proxmenux.Guest, cfg *config.Config) string {
+var fallbackExclude = []*net.IPNet{
+	mustCIDR("100.64.0.0/10"),  // CGNAT / tailscale
+	mustCIDR("172.16.0.0/12"),  // docker bridges
+	mustCIDR("169.254.0.0/16"), // link-local
+}
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic("bad builtin CIDR " + s)
+	}
+	return n
+}
+
+func excludedIP(ip string) bool {
+	p := net.ParseIP(ip)
+	if p == nil || p.IsLoopback() || !p.IsGlobalUnicast() {
+		return true
+	}
+	for _, n := range fallbackExclude {
+		if n.Contains(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSlug: explicit override (config + dashboard) wins, then the
+// service name — ProxDnx slugs from the service name, not the hostname.
+func resolveSlug(serviceName string, g proxmenux.Guest, cfg *config.Config) string {
 	if s, ok := cfg.Domain.SlugOverrides[strconv.Itoa(g.VMID)]; ok {
 		return Slugify(s)
 	}
-	if s, ok := cfg.Domain.SlugOverrides[w.Name]; ok {
+	if s, ok := cfg.Domain.SlugOverrides[serviceName]; ok {
 		return Slugify(s)
 	}
 	if s, ok := cfg.Domain.SlugOverrides[g.Name]; ok {
@@ -227,31 +376,14 @@ func resolveSlug(w proxmenux.Watch, g proxmenux.Guest, cfg *config.Config) strin
 	if cfg.Domain.SlugSource == "hostname" {
 		return Slugify(g.Name)
 	}
-	return Slugify(w.Name)
+	return Slugify(serviceName)
 }
 
-func portScheme(p proxmenux.Port) string {
-	if strings.EqualFold(p.Scheme, "https") {
+func portScheme(scheme string) string {
+	if strings.EqualFold(scheme, "https") {
 		return "https"
 	}
 	return "http"
-}
-
-func healthPath(w proxmenux.Watch) string {
-	if w.HealthPath != nil && *w.HealthPath != "" {
-		return *w.HealthPath
-	}
-	return ""
-}
-
-func probe(host string, port int, timeout time.Duration) error {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	conn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return err
-	}
-	_ = conn.Close()
-	return nil
 }
 
 func toSet(list []string) map[string]bool {

@@ -21,7 +21,6 @@ func TestHandlers(t *testing.T) {
 	snap := h.Bump()
 	snap.Domain = "home.example.com"
 	snap.TLSMode = "internal"
-	snap.Source = "oci"
 	snap.Entrypoint = "websecure"
 	snap.AuthMode = "open"
 	snap.EditEnabled = false

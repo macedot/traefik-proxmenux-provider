@@ -1,15 +1,5 @@
 package transform
 
-import (
-	"net"
-)
-
-func listenLocal() (net.Listener, error) {
-	return net.Listen("tcp", "127.0.0.1:0")
-}
-
-type tcpAddr = net.TCPAddr
-
 func itoa(n int) string {
 	b := [20]byte{}
 	i := len(b)

@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,60 +111,12 @@ func (c *Client) readToken() (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// fetch performs GET /api/vms. withToken controls the Authorization header;
-// the token is only ever sent when the caller proved the monitor wants one.
-func (c *Client) fetch(ctx context.Context, withToken bool) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/vms", nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "traefik-proxmenux-provider")
-
-	if withToken {
-		token, err := c.readToken()
-		if err != nil {
-			return nil, err
-		}
-		if token == "" {
-			return nil, fmt.Errorf("token file %q is empty", c.tokenRef.TokenFile)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s/api/vms: %w", c.base, err)
-	}
-	defer resp.Body.Close()
-
-	switch {
-	case resp.StatusCode == http.StatusOK:
-		// fallthrough to body read below
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return nil, fmt.Errorf("%w (HTTP %d)", ErrAuthRequired, resp.StatusCode)
-	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("GET %s/api/vms: unexpected status %d: %s",
-			c.base, resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(c.tokenRef.MaxResponseBytes)+1))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if int64(len(body)) > int64(c.tokenRef.MaxResponseBytes) {
-		return nil, fmt.Errorf("response exceeds max_response_bytes (%d)", c.tokenRef.MaxResponseBytes)
-	}
-	return body, nil
-}
-
 // Detect probes the monitor's authentication posture:
 //   - unauthenticated /api/vms returns 200     → AuthOpen
 //   - 401/403 and our configured token works   → AuthToken (then call SendToken)
 //   - 401/403 with no/invalid token            → error wrapping ErrAuthRequired
 func (c *Client) Detect(ctx context.Context) (AuthMode, error) {
-	if _, err := c.fetch(ctx, false); err == nil {
+	if _, err := c.getJSON(ctx, "/api/vms", false); err == nil {
 		return AuthOpen, nil
 	} else if !errors.Is(err, ErrAuthRequired) {
 		return "", err // network / server problem — not an auth verdict
@@ -173,7 +126,7 @@ func (c *Client) Detect(ctx context.Context) (AuthMode, error) {
 	if c.tokenRef.TokenFile == "" {
 		return "", fmt.Errorf("%w: monitor has auth enabled and no token_file is configured", ErrAuthRequired)
 	}
-	if _, err := c.fetch(ctx, true); err != nil {
+	if _, err := c.getJSON(ctx, "/api/vms", true); err != nil {
 		if errors.Is(err, ErrAuthRequired) {
 			return "", fmt.Errorf("%w: configured token was rejected by the monitor", ErrAuthRequired)
 		}
@@ -185,7 +138,7 @@ func (c *Client) Detect(ctx context.Context) (AuthMode, error) {
 // ListGuests fetches and decodes GET /api/vms. SendToken() must have been
 // called (after Detect) for credentials to be attached.
 func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
-	body, err := c.fetch(ctx, c.sendToken)
+	body, err := c.getJSON(ctx, "/api/vms", c.sendToken)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +147,114 @@ func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return guests, nil
+}
+
+// DiscoveredPort is one port found via docker/native discovery.
+type DiscoveredPort struct {
+	Name   string
+	Port   int
+	Source string
+}
+
+// DiscoveryPorts merges the docker + native discovery endpoints for a guest
+// (GET = cached server-side; cheap). Errors are ignored per endpoint,
+// mirroring ProxDnx.
+func (c *Client) DiscoveryPorts(ctx context.Context, vmid int) []DiscoveredPort {
+	var out []DiscoveredPort
+	seen := map[string]bool{}
+	add := func(source, name string, port int) {
+		if name == "" || port == 0 || seen[source+"|"+name+"|"+strconv.Itoa(port)] {
+			return
+		}
+		seen[source+"|"+name+"|"+strconv.Itoa(port)] = true
+		out = append(out, DiscoveredPort{Name: name, Port: port, Source: source})
+	}
+	for _, d := range []struct{ source, path string }{
+		{"docker", "/api/vms/%d/apps/docker-discovery"},
+		{"native", "/api/vms/%d/apps/native-discovery"},
+	} {
+		body, err := c.getJSON(ctx, fmt.Sprintf(d.path, vmid), c.sendToken)
+		if err != nil {
+			continue
+		}
+		var disc struct {
+			Candidates []struct {
+				ContainerName string `json:"container_name"`
+				DefaultPorts  []int  `json:"default_ports"`
+			} `json:"candidates"`
+		}
+		if json.Unmarshal(body, &disc) != nil {
+			continue
+		}
+		for _, cand := range disc.Candidates {
+			for _, p := range cand.DefaultPorts {
+				add(d.source, cand.ContainerName, p)
+			}
+		}
+	}
+	return out
+}
+
+// SystemHostname returns the PVE node hostname from the monitor API.
+func (c *Client) SystemHostname(ctx context.Context) (string, error) {
+	body, err := c.getJSON(ctx, "/api/system", c.sendToken)
+	if err != nil {
+		return "", err
+	}
+	var sys struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(body, &sys); err != nil {
+		return "", fmt.Errorf("decode /api/system: %w", err)
+	}
+	if sys.Hostname == "" {
+		return "", fmt.Errorf("monitor /api/system has no hostname")
+	}
+	return sys.Hostname, nil
+}
+
+// getJSON is the shared authed GET: same transport guarantees as fetch.
+func (c *Client) getJSON(ctx context.Context, path string, withToken bool) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "traefik-proxmenux-provider")
+	if withToken {
+		token, err := c.readToken()
+		if err != nil {
+			return nil, err
+		}
+		if token == "" {
+			return nil, fmt.Errorf("token file %q is empty", c.tokenRef.TokenFile)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s%s: %w", c.base, path, err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		// fallthrough to body read below
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, fmt.Errorf("%w (HTTP %d)", ErrAuthRequired, resp.StatusCode)
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("GET %s%s: unexpected status %d: %s", c.base, path, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(c.tokenRef.MaxResponseBytes)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if int64(len(body)) > int64(c.tokenRef.MaxResponseBytes) {
+		return nil, fmt.Errorf("response exceeds max_response_bytes (%d)", c.tokenRef.MaxResponseBytes)
+	}
+	return body, nil
 }
 
 // HasTag reports whether the guest's tag string contains tag.

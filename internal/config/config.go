@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,10 +47,26 @@ type ProxMenux struct {
 	TokenFile        string   `yaml:"token_file"`
 	Timeout          Duration `yaml:"timeout"`
 	MaxResponseBytes int      `yaml:"max_response_bytes"`
-	Source           string   `yaml:"source"`
 	LANCIDR          string   `yaml:"lan_cidr"` // prefer guest IPs in this subnet (default: provider's /24)
 	LANResolved      string   `yaml:"-"`        // runtime-resolved CIDR used by transform
 	OverridesPath    string   `yaml:"-"`        // runtime: <config dir>/overrides.json
+}
+
+// MonitorPort is the monitor API port derived from api_url.
+func (p ProxMenux) MonitorPort() int {
+	u, err := url.Parse(p.APIURL)
+	if err != nil {
+		return 8008
+	}
+	if s := u.Port(); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n < 65536 {
+			return n
+		}
+	}
+	if u.Scheme == "https" {
+		return 443
+	}
+	return 80
 }
 
 type Domain struct {
@@ -101,6 +119,11 @@ type Output struct {
 	Backup bool   `yaml:"backup"`
 }
 
+// Infra controls the static <host>/<menux> entries (ProxDnx parity).
+type Infra struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type Config struct {
 	Provider  Provider  `yaml:"provider"`
 	ProxMenux ProxMenux `yaml:"proxmenux"`
@@ -109,6 +132,7 @@ type Config struct {
 	Routing   Routing   `yaml:"routing"`
 	Expose    Expose    `yaml:"expose"`
 	Dashboard Dashboard `yaml:"dashboard"`
+	Infra     Infra     `yaml:"infra"`
 	Output    Output    `yaml:"output"`
 }
 
@@ -116,10 +140,11 @@ type Config struct {
 func Defaults() *Config {
 	return &Config{
 		Provider:  Provider{PollInterval: Duration(30 * time.Second), LogLevel: "info"},
-		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024, Source: "watches"},
+		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024},
 		Domain:    Domain{SlugSource: "watch"},
 		TLS:       TLS{Mode: "internal", CertResolver: "letsencrypt"},
-		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(2 * time.Second)},
+		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(1200 * time.Millisecond)},
+		Infra:     Infra{Enabled: true},
 		Dashboard: Dashboard{Enabled: true, Listen: ":8082", Hostname: "provider", Edit: true},
 		Output:    Output{File: "/etc/traefik/conf.d/proxmenux-generated.yaml", Mode: "0644", Backup: true},
 	}
@@ -184,11 +209,6 @@ func (c *Config) Validate() error {
 	}
 	if c.ProxMenux.MaxResponseBytes < 4096 {
 		add("proxmenux.max_response_bytes must be >= 4096")
-	}
-	switch c.ProxMenux.Source {
-	case "oci", "watches", "all":
-	default:
-		add("proxmenux.source must be oci|watches|all (got %q)", c.ProxMenux.Source)
 	}
 	if c.ProxMenux.LANCIDR != "" {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(c.ProxMenux.LANCIDR)); err != nil {

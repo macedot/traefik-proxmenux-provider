@@ -12,7 +12,6 @@ import (
 type Snapshot struct {
 	Version     string              `json:"version"`
 	Domain      string              `json:"domain"`
-	Source      string              `json:"source"`
 	TLSMode     string              `json:"tls_mode"`
 	Entrypoint  string              `json:"entrypoint"`
 	AuthMode    string              `json:"auth_mode"` // open | token | unknown

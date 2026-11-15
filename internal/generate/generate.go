@@ -29,9 +29,10 @@ type dynConfig struct {
 }
 
 type dynHTTP struct {
-	Routers     map[string]*dynRouter          `yaml:"routers,omitempty"`
-	Middlewares map[string]*dynMiddleware      `yaml:"middlewares,omitempty"`
-	Services    map[string]*dynServiceFallback `yaml:"services,omitempty"`
+	Routers           map[string]*dynRouter           `yaml:"routers,omitempty"`
+	Middlewares       map[string]*dynMiddleware       `yaml:"middlewares,omitempty"`
+	Services          map[string]*dynServiceFallback  `yaml:"services,omitempty"`
+	ServersTransports map[string]*dynServersTransport `yaml:"serversTransports,omitempty"`
 }
 
 type dynRouter struct {
@@ -65,9 +66,10 @@ type dynServiceFallback struct {
 }
 
 type dynLB struct {
-	Servers        []dynServer `yaml:"servers,omitempty"`
-	HealthCheck    *dynHealth  `yaml:"healthCheck,omitempty"`
-	PassHostHeader *bool       `yaml:"passHostHeader,omitempty"`
+	Servers          []dynServer `yaml:"servers,omitempty"`
+	HealthCheck      *dynHealth  `yaml:"healthCheck,omitempty"`
+	PassHostHeader   *bool       `yaml:"passHostHeader,omitempty"`
+	ServersTransport string      `yaml:"serversTransport,omitempty"`
 }
 
 type dynServer struct {
@@ -78,6 +80,10 @@ type dynHealth struct {
 	Path     string `yaml:"path,omitempty"`
 	Interval string `yaml:"interval,omitempty"`
 	Timeout  string `yaml:"timeout,omitempty"`
+}
+
+type dynServersTransport struct {
+	InsecureSkipVerify bool `yaml:"insecureSkipVerify"`
 }
 
 type dynTLSCertificates struct {
@@ -122,10 +128,20 @@ func Render(routes []transform.Route, cfg *config.Config) ([]byte, error) {
 	ep := cfg.Routing.Entrypoint
 
 	for _, r := range routes {
+		if r.Stale {
+			continue // tagged, visible on the dashboard, never served
+		}
 		svcName := "pmp-" + r.Slug
 		svc := &dynServiceFallback{LoadBalancer: &dynLB{
 			Servers: []dynServer{{URL: r.Target}},
 		}}
+		if r.Insecure {
+			svc.LoadBalancer.ServersTransport = "pmp-insecure"
+			if d.HTTP.ServersTransports == nil {
+				d.HTTP.ServersTransports = map[string]*dynServersTransport{}
+			}
+			d.HTTP.ServersTransports["pmp-insecure"] = &dynServersTransport{InsecureSkipVerify: true}
+		}
 		if cfg.Routing.HealthCheck && r.HealthPath != "" {
 			svc.LoadBalancer.HealthCheck = &dynHealth{
 				Path: r.HealthPath, Interval: "30s", Timeout: "5s",
