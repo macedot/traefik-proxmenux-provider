@@ -2,173 +2,151 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>traefik-proxmenux-provider</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- no-referrer: never leak the portal origin to app targets -->
+<meta name="referrer" content="no-referrer">
+<title>traefik-proxmenux-provider · published services</title>
 <style>
-  :root { --bg:#0f1115; --card:#171a21; --fg:#e6e9ef; --mut:#8b93a3; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; --bd:#262b36; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:24px; }
-  header { display:flex; flex-wrap:wrap; gap:18px; align-items:baseline; margin-bottom:14px; }
-  h1 { font-size:18px; margin:0; }
-  h1 .badge { color:var(--mut); font-weight:400; font-size:12px; margin-left:8px; }
-  .meta { color:var(--mut); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap; }
-  .meta b { color:var(--fg); font-weight:600; }
-  .counts { display:flex; gap:10px; margin-bottom:16px; }
-  .pill { background:var(--card); border:1px solid var(--bd); border-radius:8px; padding:6px 12px; font-size:13px; }
-  .pill b { margin-right:4px; }
-  .pill.ok b { color:var(--ok); } .pill.skip b { color:var(--warn); }
-  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--bd); border-radius:10px; overflow:hidden; }
-  th,td { text-align:left; padding:9px 12px; border-top:1px solid var(--bd); vertical-align:top; }
-  th { background:#1d222c; color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-top:none; }
-  tr:first-child td { border-top:none; }
-  a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
-  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; color:var(--mut); }
-  .status-ok { color:var(--ok); font-weight:600; }
-  .status-skip { color:var(--warn); font-weight:600; }
-  .err { color:var(--bad); font-size:13px; margin-bottom:12px; }
-  .empty { color:var(--mut); padding:18px; }
-  footer { color:var(--mut); font-size:12px; margin-top:16px; }
-  td.name b { display:block; }
-  td.name span { color:var(--mut); font-size:12px; }
-  tr[tabindex] { cursor:default; }
-  tr[tabindex]:hover td { background:#1b2029; }
-  .editinp { background:#0f1115; color:var(--fg); border:1px solid var(--acc); border-radius:6px; padding:4px 8px; font:13px ui-monospace,SFMono-Regular,Menlo,monospace; width:180px; }
-  .editrow button { background:#1d222c; color:var(--fg); border:1px solid var(--bd); border-radius:6px; padding:4px 10px; margin-left:6px; font-size:12px; cursor:pointer; }
-  .editrow button:hover { border-color:var(--acc); }
-  .chip { display:inline-block; background:#1d222c; border:1px solid var(--bd); border-radius:6px; padding:1px 7px; font-size:11.5px; color:var(--mut); }
-  .chip.bad { color:var(--bad); border-color:var(--bad); }
-  tr.dim td { opacity:.55; }
+  :root{--bg:#14161a;--card:#1e2126;--border:#2a2e34;--text:#e8e8ea;--muted:#9aa0a6;--accent:#58a6ff;--link:#6cb2ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:26px 32px 8px}
+  header h1{margin:0;font-size:22px;letter-spacing:.3px}
+  header h1 span{color:var(--accent)}
+  header p{margin:0;color:var(--muted);font-size:13px}
+  header .n{color:var(--accent);font-weight:700}
+  main,#staticgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+  main{padding:18px 32px 26px}
+  section#static{padding:0 32px 30px}
+  section#static h2{margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:border-color .15s,transform .15s;-webkit-user-select:none;user-select:none}
+  .card:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .card a.domain{display:block;font-size:16px;font-weight:600;color:var(--link);text-decoration:none;word-break:break-word}
+  .card a.domain:hover{text-decoration:underline}
+  .card:focus-visible,a.domain:focus-visible,.ebtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .card .svc{color:var(--muted);font-size:13px;margin-top:2px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .chip{background:#262a30;border:1px solid var(--border);border-radius:6px;padding:2px 8px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+  .chip b{color:var(--text);font-weight:600}
+  .chip.bad{color:#ff6b6b;border-color:#7a3a3a;background:#2a1a1a}
+  .chip.warn{color:#ffb86b;border-color:#7a5c2a;background:#2a2318}
+  .card.dim{opacity:.55}
+  .editrow{margin-top:10px}
+  .nameinput{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font:14px ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-user-select:text;user-select:text}
+  .editactions{display:flex;gap:6px;margin-top:8px}
+  .ebtn{background:#262a30;border:1px solid var(--border);border-radius:6px;color:var(--muted);font:12px system-ui,sans-serif;padding:5px 10px;cursor:pointer}
+  .ebtn:hover{color:var(--text)}
+  .ebtn.save{color:#7ee787;border-color:#2a4a2a}
+  footer{padding:0 32px 26px;color:var(--muted);font-size:12px}
+  footer a{color:var(--link)}
+  .empty{padding:40px 32px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
-  <h1>traefik-proxmenux-provider<span class="badge" id="ver"></span></h1>
-  <div class="meta">
-    <span>domain <b id="domain">—</b></span>
-    <span>tls <b id="tls">—</b></span>
-    <span>source <b id="source">—</b></span>
-    <span>entrypoint <b id="entrypoint">—</b></span>
-    <span>monitor auth <b id="auth">—</b></span>
-    <span>last sync <b id="last">—</b></span>
-    <span>next sync <b id="next">—</b></span>
-  </div>
+  <h1>🧭 traefik-prox<span>menux</span>-provider</h1>
+  <p><span class="n" id="n">…</span> published services · updated <span id="updated">…</span> · <span id="authmode"></span></p>
 </header>
-<div class="err" id="err" hidden></div>
-<div class="counts">
-  <span class="pill ok"><b id="c-exposed">0</b> routes published</span>
-  <span class="pill skip"><b id="c-skipped">0</b> skipped</span>
-  <span class="pill"><b id="c-syncs">0</b> syncs</span>
-</div>
-<table id="tbl" hidden>
-  <thead><tr><th>Container / App</th><th>URL</th><th>Target</th><th>Status</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
-<div class="empty" id="empty">Waiting for first sync…</div>
-<footer>Double-click a URL to rename it · <span class="mono">GET /api/routes</span> for JSON · routes live in <span class="mono">conf.d/proxmenux-generated.yaml</span></footer>
+<main id="grid"><div class="empty">loading…</div></main>
+<section id="static">
+  <h2>Infrastructure</h2>
+  <div id="staticgrid"></div>
+</section>
+<footer>generated by traefik-proxmenux-provider <b id="ver">…</b> · <a href="/api/routes">/api/routes</a> · <a href="/healthz">/healthz</a> · double-click a card (or Enter/F2) to rename its URL</footer>
 <script>
-let EDITING = false;
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString() : "—";
-async function refresh() {
-  try {
-    const s = await (await fetch("/api/routes", {cache:"no-store"})).json();
-    document.getElementById("ver").textContent = "v" + (s.version || "dev");
-    document.getElementById("domain").textContent = s.domain || "—";
-    document.getElementById("tls").textContent = s.tls_mode || "—";
-    document.getElementById("source").textContent = s.source || "—";
-    document.getElementById("entrypoint").textContent = s.entrypoint || "—";
-    document.getElementById("auth").textContent = s.auth_mode || "—";
-    document.getElementById("last").textContent = fmtTime(s.generated_at);
-    document.getElementById("next").textContent = fmtTime(s.next_sync_at);
-    document.getElementById("c-exposed").textContent = (s.routes || []).length;
-    document.getElementById("c-skipped").textContent = (s.skipped || []).length;
-    document.getElementById("c-syncs").textContent = s.sync_count || 0;
-    const err = document.getElementById("err");
-    err.hidden = !s.last_error; err.textContent = "last error: " + (s.last_error || "");
-
-    const rows = [];
-    for (const r of s.routes || []) {
-      const edit = s.edit_enabled && r.kind === "app" && !r.stale;
-      const dim = r.stale ? " dim" : "";
-      const status = r.stale
-        ? `<span class="chip bad">⚠ stale — port closed</span>`
-        : `<span class="status-ok">✓ published</span>`;
-      const kindChip = r.kind === "infra" ? `<span class="chip">static</span>` : "";
-      rows.push(`<tr data-vmid="${r.vmid}" tabindex="0" class="${dim.trim()}" title="${edit ? "double-click (or Enter/F2) to edit the URL" : ""}">` +
-        `<td class="name"><b>${esc(r.app_name)}</b><span>${kindChip} vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
-        `<td class="urlcell"><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener">https://${esc(r.hostname)}</a></td>` +
-        `<td class="mono">${esc(r.target)}</td>` +
-        `<td>${status}</td></tr>`);
-    }
-    for (const k of s.skipped || []) {
-      rows.push(`<tr><td class="name"><b>${esc(k.app_name)}</b><span>vmid ${k.vmid} · ${esc(k.guest_name)}</span></td>` +
-        `<td class="mono">${esc(k.slug || "—")}</td><td class="mono">—</td>` +
-        `<td class="status-skip">⃠ ${esc(k.reason)}</td></tr>`);
-    }
-    const tbl = document.getElementById("tbl"), empty = document.getElementById("empty");
-    tbl.hidden = rows.length === 0; empty.hidden = rows.length > 0;
-    const tbody = document.getElementById("rows");
-    tbody.innerHTML = rows.join("");
-    if (s.edit_enabled) {
-      tbody.querySelectorAll("tr[data-vmid]").forEach(tr => {
-        const r = (s.routes || []).find(x => x.vmid === parseInt(tr.dataset.vmid, 10) && x.kind === "app" && !x.stale);
-        if (r) { wireEdit(tr, r); }
-      });
-    }
-  } catch (e) { /* transient fetch error: keep last render */ }
-}
-
-// ProxDnx-style editing: double-click the row (or Enter/F2 on the focused
-// row) edits the URL slug; Save persists, Default resets, Cancel reverts.
-// click-count detection (ev.detail===2) is steadier than the dblclick event;
-// links and the edit row are exempt. EDITING pauses auto-refresh.
-function wireEdit(row, r) {
-  row.addEventListener("click", (ev) => {
-    if (ev.target.closest("a") || ev.target.closest(".editrow") || EDITING) return;
-    if (ev.detail === 2) startEdit(row, r);
-  });
-  row.addEventListener("keydown", (ev) => {
-    if (ev.target !== row || EDITING) return;
-    if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); startEdit(row, r); }
-  });
-}
-function startEdit(row, r) {
-  if (EDITING) return;
-  EDITING = true;
-  row.classList.add("editing");
-  const cell = row.querySelector(".urlcell");
-  const old = cell.innerHTML;
-  cell.innerHTML = "";
-  const inp = document.createElement("input");
-  inp.className = "editinp"; inp.value = r.slug;
-  const actions = document.createElement("span");
-  actions.className = "editrow";
-  const mk = (label, fn, title) => {
-    const b = document.createElement("button");
-    b.textContent = label; b.title = title; b.onclick = fn;
-    return b;
+function esc(s){const d=document.createElement("div");d.textContent=s==null?"":String(s);return d.innerHTML}
+function proto(){return location.protocol}
+// click-to-edit: rename the published URL (service name never changes);
+// auto-refresh pauses while an edit is open
+let EDITING=false;
+function startEdit(card,x,link){
+  if(EDITING)return;EDITING=true;
+  const row=document.createElement("div");row.className="editrow";
+  const inp=document.createElement("input");inp.className="nameinput";
+  inp.value=x.slug;inp.maxLength=63;inp.autocomplete="off";inp.spellcheck=false;
+  row.appendChild(inp);
+  const actions=document.createElement("div");actions.className="editactions";
+  const save=document.createElement("button");save.className="ebtn save";save.textContent="✓ save";
+  const def=document.createElement("button");def.className="ebtn";def.textContent="↺ default";
+  const cancel=document.createElement("button");cancel.className="ebtn";cancel.textContent="✕ discard";
+  save.onclick=async()=>{
+    const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({vmid:x.vmid,slug:inp.value})});
+    if(!r.ok){const j=await r.json().catch(()=>({}));save.textContent=j.error||"error";return}
+    EDITING=false;load();
   };
-  const save = mk("Save", async () => {
-    await fetch("/api/slug", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vmid: r.vmid, slug: inp.value }) });
-    EDITING = false; refresh();
-  }, "set the URL to <slug>.<domain>");
-  const def = mk("Default", async () => {
-    await fetch("/api/slug", { method: "DELETE", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vmid: r.vmid }) });
-    EDITING = false; refresh();
-  }, "reset to the automatic slug");
-  const cancel = mk("Cancel", () => { cell.innerHTML = old; row.classList.remove("editing"); EDITING = false; }, "cancel");
-  actions.append(save, def, cancel);
-  inp.onkeydown = (ev) => {
-    if (ev.key === "Enter") { ev.preventDefault(); save.onclick(); }
-    else if (ev.key === "Escape") { ev.preventDefault(); cancel.onclick(); }
+  def.onclick=async()=>{
+    await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({vmid:x.vmid})});
+    EDITING=false;load();
   };
-  cell.append(inp, actions);
+  cancel.onclick=()=>{EDITING=false;load();};
+  inp.onkeydown=(ev)=>{
+    if(ev.key==="Enter"){ev.preventDefault();save.onclick();}
+    else if(ev.key==="Escape"){ev.preventDefault();cancel.onclick();}
+  };
+  actions.append(save,def,cancel);
+  link.replaceWith(row);
+  row.prepend(inp);
   inp.focus();
 }
-refresh();
-setInterval(() => { if (EDITING) return; refresh(); }, 10000);
+async function load(){
+  try{
+    const s=await (await fetch("/api/routes",{cache:"no-store"})).json();
+    const g=document.getElementById("grid");
+    g.innerHTML="";
+    const apps=(s.routes||[]).filter(r=>r.kind==="app");
+    apps.forEach(x=>{
+      const c=document.createElement("div");c.className="card"+(x.stale?" dim":"");
+      const flags=(x.stale?'<span class="chip bad">⚠ stale — port closed</span>':'');
+      const link=document.createElement("a");link.className="domain";link.href=proto()+"//"+x.hostname+"/";
+      link.textContent=x.hostname;
+      link.target="_blank";link.rel="noopener noreferrer";
+      c.appendChild(link);
+      const svc=document.createElement("div");svc.className="svc";svc.textContent=x.app_name;
+      c.appendChild(svc);
+      if(flags){const fl=document.createElement("div");fl.className="chips";fl.innerHTML=flags;c.appendChild(fl)}
+      const ch=document.createElement("div");ch.className="chips";
+      ch.innerHTML='<span class="chip">🖥 <b>'+esc(x.guest_name)+'</b></span><span class="chip"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</span>';
+      c.appendChild(ch);
+      if(s.edit_enabled&&!x.stale){
+        c.title="double-click (or Enter) to edit the URL name";
+        c.tabIndex=0;
+        // click-count detection (ev.detail===2) is steadier than the native
+        // dblclick event; links and the edit row are exempt
+        c.addEventListener("click",(ev)=>{
+          if(ev.target.closest("a")||ev.target.closest(".editrow"))return;
+          if(ev.detail===2)startEdit(c,x,link);
+        });
+        // keyboard: Enter/F2 on the focused card edits; keys on children
+        // (link, buttons, input) keep their native meaning
+        c.addEventListener("keydown",(ev)=>{
+          if(ev.target!==c)return;
+          if(ev.key==="Enter"||ev.key==="F2"){ev.preventDefault();startEdit(c,x,link);}
+        });
+      }
+      g.appendChild(c);
+    });
+    if(apps.length===0)g.innerHTML='<div class="empty">waiting for the first sync…</div>';
+    document.getElementById("n").textContent=apps.length;
+    document.getElementById("updated").textContent=new Date(s.generated_at).toLocaleString();
+    document.getElementById("authmode").textContent=s.auth_mode?"monitor auth: "+s.auth_mode:"";
+    document.getElementById("ver").textContent=s.version||"dev";
+    // infrastructure section (ProxDnx parity: static entries, not editable)
+    const sg=document.getElementById("staticgrid");
+    sg.innerHTML="";
+    const infra=(s.routes||[]).filter(r=>r.kind==="infra"&&!r.stale);
+    infra.forEach(r=>{
+      const c=document.createElement("div");c.className="card";
+      c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="'+proto()+'//'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
+        +'<div class="svc">'+esc(r.app_name)+'</div>'
+        +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><span class="chip"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</span></div>';
+      sg.appendChild(c);
+    });
+    document.getElementById("static").hidden=infra.length===0;
+  }catch(e){document.getElementById("grid").innerHTML='<div class="empty">failed to load: '+esc(e)+'</div>'}
+}
+load();setInterval(()=>{if(EDITING)return;load()},30000);
 </script>
 </body>
 </html>
