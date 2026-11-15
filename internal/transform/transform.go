@@ -254,8 +254,22 @@ func mergePorts(g proxmenux.Guest, extras []ServicePort) []ServicePort {
 			return
 		}
 		seen[k] = true
-		if sp.Scheme == "" {
+		// Scheme allowlist: only http/https may reach the generated config
+		// or the dashboard (a crafted scheme could become an executable
+		// URL in the UI). Empty defaults to http; anything else is dropped.
+		switch sp.Scheme {
+		case "":
 			sp.Scheme = "http"
+		case "http", "https":
+		default:
+			return
+		}
+		// Path hygiene: must be a sane URL path or empty.
+		if sp.WebPath != "" && !sanePath(sp.WebPath) {
+			sp.WebPath = ""
+		}
+		if sp.HealthPath != "" && !sanePath(sp.HealthPath) {
+			sp.HealthPath = ""
 		}
 		out = append(out, sp)
 	}
@@ -354,6 +368,20 @@ func probeCandidates(routes []*Route, cfg *config.Config) {
 		}(r)
 	}
 	wg.Wait()
+}
+
+// sanePath: URL path must start with "/" and contain no whitespace or
+// control characters (defense against crafted monitor data).
+func sanePath(p string) bool {
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, r := range p {
+		if r <= ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // pickIP mirrors ProxDnx: IPv4 from ips[] (plus ip), subnet-preferred, then

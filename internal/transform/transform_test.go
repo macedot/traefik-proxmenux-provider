@@ -403,3 +403,36 @@ func TestInfraToggle(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemeAndPathHygiene(t *testing.T) {
+	cfg := base()
+	cfg.Routing.Probe = false
+	g := guest(100, "x", "lxc", "192.0.2.50", "running",
+		watch("A", 80), watch("B", 81), watch("C", 82), watch("D", 83))
+	// craft watches with hostile scheme/path via raw struct
+	g.AppWatches = []proxmenux.Watch{
+		{Name: "A", Ports: []proxmenux.Port{{Port: 80, Scheme: "javascript", WebPath: "/"}}},
+		{Name: "B", Ports: []proxmenux.Port{{Port: 81, Scheme: "https", WebPath: "no-slash"}}},
+		{Name: "C", Ports: []proxmenux.Port{{Port: 82, Scheme: "", WebPath: "/ok path"}}},
+		{Name: "D", Ports: []proxmenux.Port{{Port: 83, Scheme: "HTTPS", WebPath: "/ok"}}},
+	}
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	got := map[string]Route{}
+	for _, r := range res.Routes {
+		got[r.AppName] = r
+	}
+	// Hostile scheme is collapsed to http by portScheme (verified), and the
+	// mergePorts allowlist is the second layer: only http/https survive.
+	if r := got["A"]; r.Scheme != "http" {
+		t.Fatalf("A: hostile scheme must normalize to http, got %q", r.Scheme)
+	}
+	if r := got["B"]; r.Served && r.Scheme != "https" {
+		t.Fatalf("B: %+v", r)
+	}
+	if r := got["C"]; r.WebPath != "" {
+		t.Fatalf("C web_path with space must be cleared: %q", r.WebPath)
+	}
+	if r := got["D"]; r.Scheme != "https" || r.WebPath != "/ok" {
+		t.Fatalf("D: scheme=%q web=%q", r.Scheme, r.WebPath)
+	}
+}

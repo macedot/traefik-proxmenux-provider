@@ -237,3 +237,30 @@ func TestWriteAtomic(t *testing.T) {
 		t.Fatalf("dir entries = %d, want 2", len(entries))
 	}
 }
+
+func TestDashboardRouteFailClosed(t *testing.T) {
+	c := cfg(t, "")
+	c.Dashboard.Enabled = true
+	c.Dashboard.ViaTraefik = true
+	c.Dashboard.Hostname = "provider"
+
+	// No allow_cidrs: refuse to publish the dashboard (mutation API).
+	_, err := Render(routes(), c)
+	if err == nil || !strings.Contains(err.Error(), "allow_cidrs") {
+		t.Fatalf("want fail-closed error, got %v", err)
+	}
+
+	// With CIDRs: router + ipAllowList middleware.
+	c.Dashboard.AllowCIDRs = []string{"192.0.2.0/24"}
+	out, err := Render(routes(), c)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	m := parseYAML(t, out)
+	if _, ok := m["http"].(map[string]any)["routers"].(map[string]any)["pmp-dashboard"]; !ok {
+		t.Fatal("dashboard router missing with allow_cidrs set")
+	}
+	if !strings.Contains(string(out), "ipAllowList") {
+		t.Fatal("ipAllowList middleware missing")
+	}
+}

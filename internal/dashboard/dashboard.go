@@ -1,9 +1,11 @@
-// Package dashboard serves the read-only status UI: every generated URL
-// per container, probe results, skip reasons, sync times.
+// Package dashboard serves the provider status UI: generated URLs, probe
+// state, skip reasons, sync times, plus gated edit endpoints (rename /
+// domain pick, per-app toggle) that require dashboard.edit and persist
+// only to overrides.json.
 //
-// Security by construction: no mutation endpoints, no secrets in the
-// snapshot, plain LAN bind by default (or Traefik-routed with a CIDR
-// allowlist via dashboard.via_traefik).
+// Exposure model: plain LAN bind by default; Traefik-routed only with a
+// CIDR allowlist (generate refuses to publish the route otherwise — the
+// edit API must never be public).
 package dashboard
 
 import (

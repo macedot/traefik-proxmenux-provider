@@ -112,7 +112,7 @@ func routerTLS(cfg *config.Config) *dynRouterTLS {
 
 func allowlistMiddleware(name string, cidrs []string, m map[string]*dynMiddleware) []string {
 	if len(cidrs) == 0 {
-		return nil
+		return nil // caller must fail closed when an allowlist is required
 	}
 	m[name] = &dynMiddleware{IPAllowList: &dynIPAllowList{SourceRange: cidrs}}
 	return []string{name}
@@ -159,8 +159,14 @@ func Render(routes []transform.Route, cfg *config.Config) ([]byte, error) {
 		d.HTTP.Routers[svcName] = router
 	}
 
-	// Provider dashboard routed through Traefik (CIDR-allowlisted).
+	// Provider dashboard routed through Traefik. FAIL-CLOSED: the UI carries
+	// mutation endpoints, so it is never published without an explicit
+	// allowlist — an open route would expose rename/toggle APIs publicly.
 	if cfg.Dashboard.Enabled && cfg.Dashboard.ViaTraefik {
+		if len(cfg.Dashboard.AllowCIDRs) == 0 {
+			return nil, fmt.Errorf("dashboard.via_traefik requires dashboard.allow_cidrs " +
+				"(refusing to publish the dashboard — its edit API would be public)")
+		}
 		port, err := listenPort(cfg.Dashboard.Listen)
 		if err != nil {
 			return nil, fmt.Errorf("dashboard.listen: %w", err)
