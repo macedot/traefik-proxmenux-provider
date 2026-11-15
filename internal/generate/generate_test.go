@@ -264,3 +264,43 @@ func TestDashboardRouteFailClosed(t *testing.T) {
 		t.Fatal("ipAllowList middleware missing")
 	}
 }
+
+func TestSanitizeHostname(t *testing.T) {
+	cases := map[string]string{
+		"  PVE-Host.Example.COM ": "pve-host.example.com",
+		"ALREADY-OK.example.com":  "already-ok.example.com",
+		"":                        "",
+	}
+	for in, want := range cases {
+		if got := SanitizeHostname(in); got != want {
+			t.Fatalf("SanitizeHostname(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestListenPort(t *testing.T) {
+	if p, err := listenPort(":8082"); err != nil || p != 8082 {
+		t.Fatalf("listenPort(:8082) = %d, %v", p, err)
+	}
+	if _, err := listenPort("no-port"); err == nil {
+		t.Fatal("missing port must error")
+	}
+	if _, err := listenPort(":99999"); err == nil {
+		t.Fatal("out-of-range port must error")
+	}
+}
+
+func TestRenderInsecureTransport(t *testing.T) {
+	c := cfg(t, "")
+	rs := routes()
+	ins := rs[0]
+	ins.Insecure = true
+	rs[0] = ins
+	out, err := Render(rs, c)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(string(out), "pmp-insecure") || !strings.Contains(string(out), "insecureSkipVerify: true") {
+		t.Fatal("pmp-insecure serversTransport missing for insecure route")
+	}
+}

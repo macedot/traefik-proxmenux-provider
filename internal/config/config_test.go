@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +115,48 @@ func TestOutputMode(t *testing.T) {
 	}
 	if m.String() != "-rw-r--r--" {
 		t.Errorf("mode = %s, want -rw-r--r--", m.String())
+	}
+}
+
+func TestMonitorPort(t *testing.T) {
+	c := Defaults()
+	if got := c.ProxMenux.MonitorPort(); got != 80 {
+		t.Fatalf("MonitorPort with no port in api_url = %d, want 80 (URL default)", got)
+	}
+	c2, err := Parse([]byte("proxmenux:\n  api_url: http://host:9000\ndomain:\n  base: example.com\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c2.ProxMenux.MonitorPort(); got != 9000 {
+		t.Fatalf("MonitorPort from api_url = %d, want 9000", got)
+	}
+}
+
+func TestDomainAllDedupesAndOrders(t *testing.T) {
+	c := Defaults()
+	c.Domain.Base = "a.example.com"
+	c.Domain.Alternates = []string{"b.example.com", "a.example.com", " ", "c.example.com"}
+	got := c.Domain.All()
+	if len(got) != 3 || got[0] != "a.example.com" || got[1] != "b.example.com" || got[2] != "c.example.com" {
+		t.Fatalf("All() = %v", got)
+	}
+}
+
+func TestLoadErrors(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+		t.Fatal("missing file must error")
+	}
+	p := filepath.Join(t.TempDir(), "bad.yaml")
+	if err := os.WriteFile(p, []byte("unknown_key: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("unknown key must fail validation")
+	}
+}
+
+func TestOutputModeInvalid(t *testing.T) {
+	if _, err := (Output{Mode: "zzz"}).OutputMode(); err == nil {
+		t.Fatal("invalid octal must error")
 	}
 }

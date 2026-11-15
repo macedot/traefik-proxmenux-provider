@@ -294,8 +294,8 @@ func TestBuildInfraRoutes(t *testing.T) {
 	want := map[string]string{
 		"pve-host.home.example.com":       "https://192.0.2.99:8006",
 		"pve-host.menux.home.example.com": "http://192.0.2.99:8008",
-		"menux.home.example.com":       "http://192.0.2.99:8008",
-		"proxmenux.home.example.com":   "http://192.0.2.99:8008",
+		"menux.home.example.com":          "http://192.0.2.99:8008",
+		"proxmenux.home.example.com":      "http://192.0.2.99:8008",
 	}
 	for _, r := range infra {
 		if want[r.Hostname] != r.Target {

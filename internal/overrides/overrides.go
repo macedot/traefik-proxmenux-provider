@@ -48,7 +48,12 @@ func (s *Store) loadLocked() (File, error) {
 		return f, err
 	}
 	if err := json.Unmarshal(b, &f); err != nil {
-		return File{SlugOverrides: map[string]string{}, Disabled: map[string]bool{}}, fmt.Errorf("parse overrides: %w", err)
+		return File{
+			SlugOverrides: map[string]string{},
+			Domains:       map[string]string{},
+			DomainsOff:    map[string]bool{},
+			Disabled:      map[string]bool{},
+		}, fmt.Errorf("parse overrides: %w", err)
 	}
 	if f.SlugOverrides == nil {
 		f.SlugOverrides = map[string]string{}

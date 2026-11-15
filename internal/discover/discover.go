@@ -4,6 +4,7 @@
 package discover
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -110,9 +111,7 @@ func localSubnetHosts() ([]string, error) {
 			// Only scan /24 around self, and skip own address later is fine.
 			base := []byte{ip4[0], ip4[1], ip4[2], 0}
 			for i := 1; i <= 254; i++ {
-				h := net.IP(append([]byte(nil), base...)).String()
-				h = strings.TrimSuffix(h, ".0") + "." + strconv.Itoa(i)
-				h = fmt.Sprintf("%d.%d.%d.%d", base[0], base[1], base[2], i)
+				h := fmt.Sprintf("%d.%d.%d.%d", base[0], base[1], base[2], i)
 				if !seen[h] {
 					seen[h] = true
 					out = append(out, h)
@@ -129,6 +128,10 @@ func localSubnetHosts() ([]string, error) {
 func ipLess(a, b string) bool {
 	ah, _ := hostOf(a)
 	bh, _ := hostOf(b)
+	// numeric comparison for valid IPs (10.0.0.2 < 10.0.0.10), string fallback otherwise
+	if ai, bi := net.ParseIP(ah), net.ParseIP(bh); ai != nil && bi != nil {
+		return bytes.Compare(ai.To4(), bi.To4()) < 0
+	}
 	return strings.Compare(ah, bh) < 0
 }
 
