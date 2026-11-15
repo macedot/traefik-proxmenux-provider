@@ -36,7 +36,7 @@
   a.chip:hover{border-color:var(--accent);color:var(--text)}
   .chip.bad{color:#ff6b6b;border-color:#7a3a3a;background:#2a1a1a}
   .chip.warn{color:#ffb86b;border-color:#7a5c2a;background:#2a2318}
-  .ebtn.tgl{margin-left:auto;color:var(--text)}
+  .ebtn.tgl{margin-left:auto;color:var(--text);font-size:14px;line-height:1}
   .chips .ebtn{font-size:12px}
   .card.dim{opacity:.55}
   .editrow{margin-top:10px}
@@ -72,15 +72,14 @@ function isoStamp(d){
     +p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds())
     +" "+sign+p(Math.floor(a/60))+":" +p(a%60);
 }
-// waitSync polls /api/routes until pred(route) holds or ~9s pass, so the
-// card keeps its edit animation until the provider actually republished.
-async function waitSync(vmid,pred){
+// waitSync polls /api/routes until pred(routes) holds or ~9s pass, so a
+// control keeps its transitional state until the provider republishes.
+async function waitSync(pred){
   for(let i=0;i<10;i++){
     await new Promise(r=>setTimeout(r,900));
     try{
       const s=await (await fetch("/api/routes",{cache:"no-store"})).json();
-      const r=(s.routes||[]).find(v=>v.vmid===vmid&&v.kind==="app");
-      if(r&&pred(r))return true;
+      if(pred(s.routes||[]))return true;
     }catch(e){}
   }
   return false;
@@ -115,7 +114,8 @@ function startEdit(card,x,link){
     if(!r.ok){const j=await r.json().catch(()=>({}));save.disabled=false;save.textContent=j.error||"error";return}
     // server slugifies; mirror it to detect the republished hostname
     const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-    await waitSync(x.vmid,rt=>rt.hostname===slug+"."+sel.value);
+    const want=slug+"."+sel.value;
+    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname===want});
     EDITING=false;load();
   };
   def.onclick=async()=>{
@@ -123,7 +123,7 @@ function startEdit(card,x,link){
     def.disabled=true;def.textContent="⟳ syncing";
     await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({vmid:x.vmid})});
-    await waitSync(x.vmid,rt=>rt.hostname!==x.hostname);
+    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname!==x.hostname});
     EDITING=false;load();
   };
   cancel.onclick=()=>{EDITING=false;load();};
@@ -158,12 +158,20 @@ async function load(){
         +'<a class="chip iplink" href="'+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+' directly"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</a>';
       if(s.edit_enabled){
         const t=document.createElement("button");t.className="ebtn tgl";
-        t.textContent=x.disabled?"▶ enable":"⏸ disable";
-        t.title=x.disabled?"re-enable this route":"stop serving this route (card stays visible)";
+        // status dot: 🟢 serving · 🟠 applying · 🔴 stopped
+        const setDot=()=>{
+          t.textContent=x.disabled?"🔴":(x.stale?"🟠":"🟢");
+          t.title=x.disabled?"stopped — click to start":"serving — click to stop";
+        };
+        setDot();
         t.onclick=async()=>{
+          if(t.disabled)return;
+          const want=!x.disabled;
+          t.disabled=true;t.textContent="🟠";t.title="applying…";
           const r=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
             body:JSON.stringify({vmid:x.vmid,disabled:!x.disabled})});
-          if(!r.ok){const j=await r.json().catch(()=>({}));t.textContent=j.error||"error";return}
+          if(!r.ok){const j=await r.json().catch(()=>({}));t.disabled=false;t.textContent=j.error||"error";return}
+          await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.served===want});
           load();
         };
         ch.appendChild(t);
@@ -226,15 +234,24 @@ async function load(){
       c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="'+proto()+'//'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
         +'<div class="svc">'+esc(r.app_name)+'</div>'
         +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><a class="chip iplink" href="'+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+' directly"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</a>'+chip
-        +(s.edit_enabled?'<button class="ebtn tgl" title="'+(r.disabled?"publish this route":"stop serving this route (card stays visible)")+'">'+(r.disabled?"▶ enable":"⏸ disable")+"</button>":"")
+        +(s.edit_enabled?'<button class="ebtn tgl" title="route status / toggle"></button>':"")
         +'</div>';
       const b=c.querySelector(".ebtn.tgl");
-      if(b)b.onclick=async()=>{
-        const res=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({key:r.key,disabled:!r.disabled})});
-        if(!res.ok){const j=await res.json().catch(()=>({}));b.textContent=j.error||"error";return}
-        load();
-      };
+      if(b){
+        const setDot=()=>{b.textContent=r.disabled?"🔴":(r.stale?"🟠":"🟢");
+          b.title=r.disabled?"stopped — click to start":"serving — click to stop";};
+        setDot();
+        b.onclick=async()=>{
+          if(b.disabled)return;
+          const want=!r.disabled;
+          b.disabled=true;b.textContent="🟠";b.title="applying…";
+          const res=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({key:r.key,disabled:!r.disabled})});
+          if(!res.ok){const j=await res.json().catch(()=>({}));b.disabled=false;b.textContent=j.error||"error";return}
+          await waitSync(rs=>{const rt=rs.find(v=>v.kind==="infra"&&v.key===r.key);return !!rt&&rt.served===want});
+          load();
+        };
+      }
       sg.appendChild(c);
     });
     document.getElementById("static").hidden=infra.length===0;
