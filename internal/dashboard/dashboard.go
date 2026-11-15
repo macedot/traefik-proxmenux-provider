@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
@@ -159,19 +160,28 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 			return
 		}
 		var req struct {
-			VMID     int  `json:"vmid"`
-			Disabled bool `json:"disabled"`
+			VMID     int    `json:"vmid"`
+			Key      string `json:"key"` // infra entries ("infra:<slug>"); vmid otherwise
+			Disabled bool   `json:"disabled"`
 		}
-		if err := json.Unmarshal(body, &req); err != nil || req.VMID <= 0 {
-			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid required"})
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
 			return
 		}
-		if err := o.Store.SetDisabled(strconv.Itoa(req.VMID), req.Disabled); err != nil {
+		key := req.Key
+		if key == "" && req.VMID > 0 {
+			key = strconv.Itoa(req.VMID)
+		}
+		if key == "" || len(key) > 64 || strings.ContainsAny(key, "/\\ 	\n") {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid or key required"})
+			return
+		}
+		if err := o.Store.SetDisabled(key, req.Disabled); err != nil {
 			writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		signalResync(o)
-		writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "disabled": req.Disabled})
+		writeJSON(http.StatusOK, map[string]any{"ok": true, "key": key, "disabled": req.Disabled})
 	})
 	return mux
 }

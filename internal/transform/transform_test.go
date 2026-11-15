@@ -366,3 +366,40 @@ func TestDefaultEnabledConfig(t *testing.T) {
 		t.Fatalf("explicit disable must hold: %+v", res3.Routes)
 	}
 }
+
+func TestInfraToggle(t *testing.T) {
+	cfg := base()
+	cfg.Routing.Probe = false
+	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98")
+	if len(infra) != 4 {
+		t.Fatalf("infra routes = %d, want 4", len(infra))
+	}
+
+	// default_enabled=false: all infra disabled, keys present.
+	cfg.Routing.DefaultEnabled = false
+	ApplyToggle(infra, nil, cfg)
+	for _, r := range infra {
+		if !r.Disabled || r.Served || r.Key == "" {
+			t.Fatalf("%s: key=%q disabled=%v served=%v", r.Slug, r.Key, r.Disabled, r.Served)
+		}
+	}
+
+	// Explicit enable overrides the default.
+	ApplyToggle(infra, map[string]bool{"infra:menux": false}, cfg)
+	for _, r := range infra {
+		wantOn := r.Slug == "menux"
+		if r.Disabled == wantOn {
+			t.Fatalf("%s: disabled=%v want %v", r.Slug, r.Disabled, !wantOn)
+		}
+	}
+
+	// default_enabled=true + explicit disable.
+	cfg.Routing.DefaultEnabled = true
+	ApplyToggle(infra, map[string]bool{"infra:proxmenux": true}, cfg)
+	for _, r := range infra {
+		wantOff := r.Slug == "proxmenux"
+		if r.Disabled != wantOff {
+			t.Fatalf("%s: disabled=%v want %v", r.Slug, r.Disabled, wantOff)
+		}
+	}
+}

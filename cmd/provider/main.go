@@ -182,6 +182,8 @@ func main() {
 							transform.ProbeRoute(&infra[i], cfg.Routing.ProbeTimeout.Std())
 						}
 					}
+					// Toggle after probing so a disabled entry stays off.
+					transform.ApplyToggle(infra, disabled, cfg)
 					result.Routes = append(infra, result.Routes...)
 				}
 			} else {

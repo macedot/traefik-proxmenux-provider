@@ -156,15 +156,25 @@ async function load(){
     document.getElementById("authmode").textContent=s.auth_mode?"monitor auth: "+s.auth_mode:"";
     document.getElementById("ver").textContent=s.version||"dev";
     sDomains=s.domains||[];
-    // infrastructure section (ProxDnx parity: static entries, not editable)
+    // infrastructure section (toggleable like apps; default from config)
     const sg=document.getElementById("staticgrid");
     sg.innerHTML="";
     const infra=(s.routes||[]).filter(r=>r.kind==="infra"&&!r.stale);
     infra.forEach(r=>{
-      const c=document.createElement("div");c.className="card";
+      const c=document.createElement("div");c.className="card"+(r.disabled?" dim":"");
+      const chip=r.disabled?'<span class="chip warn">⏸ disabled</span>':"";
       c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="'+proto()+'//'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
         +'<div class="svc">'+esc(r.app_name)+'</div>'
-        +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><span class="chip"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</span></div>';
+        +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><span class="chip"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</span>'+chip
+        +(s.edit_enabled?'<button class="ebtn tgl" title="'+(r.disabled?"publish this route":"stop serving this route (card stays visible)")+'">'+(r.disabled?"▶ enable":"⏸ disable")+"</button>":"")
+        +'</div>';
+      const b=c.querySelector(".ebtn.tgl");
+      if(b)b.onclick=async()=>{
+        const res=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({key:r.key,disabled:!r.disabled})});
+        if(!res.ok){const j=await res.json().catch(()=>({}));b.textContent=j.error||"error";return}
+        load();
+      };
       sg.appendChild(c);
     });
     document.getElementById("static").hidden=infra.length===0;

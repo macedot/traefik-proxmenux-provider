@@ -22,6 +22,7 @@ import (
 
 // Route is one app/infra route.
 type Route struct {
+	Key        string `json:"key,omitempty"` // override key; infra uses "infra:<slug>"
 	Slug       string `json:"slug"`
 	Hostname   string `json:"hostname"`
 	Domain     string `json:"domain"` // the domain part of the URL (per-app pick)
@@ -296,8 +297,29 @@ func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 	out := append([]Route{pve}, menux...)
 	for i := range out {
 		out[i].Served = true
+		out[i].Key = "infra:" + out[i].Slug
 	}
 	return out
+}
+
+// ApplyToggle applies the per-route on/off state to infrastructure
+// routes (apps are handled inside Transform). Explicit state wins;
+// absent keys follow cfg.Routing.DefaultEnabled.
+func ApplyToggle(routes []Route, disabled map[string]bool, cfg *config.Config) {
+	for i := range routes {
+		r := &routes[i]
+		if r.Kind != "infra" || r.Key == "" {
+			continue
+		}
+		var off bool
+		if v, ok := disabled[r.Key]; ok {
+			off = v
+		} else {
+			off = !cfg.Routing.DefaultEnabled
+		}
+		r.Disabled = off
+		r.Served = !off && !r.Stale
+	}
 }
 
 // ProbeRoute TCP-probes a route target and updates its staleness.
