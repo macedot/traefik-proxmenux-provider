@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -299,12 +300,21 @@ func resolveLAN(cfg *config.Config) error {
 		cfg.ProxMenux.LANResolved = v
 		return nil
 	}
+	// Prefer the network of the configured PVE host adapter: from inside a
+	// guest attached to that bridge, the default gateway IS the host's
+	// address on the adapter (ProxDnx resolves the same by running
+	// `ip -4 -o addr show dev <bridge>` on the host itself).
+	if gip, ok := defaultGateway(routeFile); ok {
+		cfg.ProxMenux.BridgeResolved = gip
+		cfg.ProxMenux.LANResolved = ipMask24(gip)
+		return nil
+	}
 	// Prefer the PVE host's own network: the monitor API runs on the host,
 	// so its IP is a host address. Guests with multiple NICs then match the
 	// host's bridge network first (ProxDnx resolveSubnet parity).
 	if u, err := url.Parse(cfg.ProxMenux.APIURL); err == nil {
 		if ip := net.ParseIP(u.Hostname()); ip != nil && ip.To4() != nil && !ip.IsLoopback() && ip.IsGlobalUnicast() {
-			cfg.ProxMenux.LANResolved = ip.Mask(net.CIDRMask(24, 32)).String() + "/24"
+			cfg.ProxMenux.LANResolved = ipMask24(ip.String())
 			return nil
 		}
 	}
@@ -329,11 +339,49 @@ func resolveLAN(cfg *config.Config) error {
 			if ip4 == nil || ip4.IsLoopback() || ip4.IsLinkLocalUnicast() {
 				continue
 			}
-			cfg.ProxMenux.LANResolved = ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+			cfg.ProxMenux.LANResolved = ipMask24(ip4.String())
 			return nil
 		}
 	}
 	return fmt.Errorf("no non-loopback IPv4 interface found")
+}
+
+// routeFile is the kernel routing table, overridable in tests.
+var routeFile = "/proc/net/route"
+
+// defaultGateway parses the IPv4 default gateway (little-endian hex in
+// /proc/net/route) — from a guest on the bridge this is the host's address.
+func defaultGateway(routeFile string) (string, bool) {
+	b, err := os.ReadFile(routeFile) // #nosec G304 -- fixed kernel path, var for tests
+	if err != nil {
+		return "", false
+	}
+	lines := strings.Split(string(b), "\n")
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) < 3 || f[1] != "00000000" {
+			continue
+		}
+		raw, err := hex.DecodeString(f[2])
+		if err != nil || len(raw) != 4 {
+			continue
+		}
+		ip := net.IPv4(raw[3], raw[2], raw[1], raw[0])
+		if ip.IsUnspecified() || ip.IsLoopback() {
+			continue
+		}
+		return ip.String(), true
+	}
+	return "", false
+}
+
+// ipMask24 returns the /24 network containing ip.
+func ipMask24(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil {
+		return ""
+	}
+	return p.Mask(net.CIDRMask(24, 32)).String() + "/24"
 }
 
 func runDiscovery() {

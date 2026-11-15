@@ -22,7 +22,8 @@ Full annotated example: [`config.example.yaml`](../config.example.yaml).
 | `timeout` | `"10s"` | per-request |
 | `max_response_bytes` | `5242880` | response cap |
 | `source` | `oci` | `oci` = OCI-catalog watches only; `watches` = all app_watches; `all` = + discovery |
-| `lan_cidr` | auto | prefer guest IPs in this subnet; when unset it is auto-resolved in order: (1) the PVE host's own network — the monitor API runs on the host, so its address is a host IP (ProxDnx `resolveSubnet` parity), (2) the provider CT's own /24 |
+| `lan_cidr` | auto | prefer guest IPs in this subnet; when unset it is auto-resolved in order: (1) the configured bridge adapter's host address (the guest's default gateway — ProxDnx `resolveSubnet` parity), (2) the PVE host's address from `api_url`, (3) the provider CT's own /24 |
+| `bridge` | `vmbr0` | PVE host adapter whose network guest IPs are matched against — the guest's default gateway on this adapter is the host's IP; max 15 chars, Linux interface name rules |
 
 ## domain
 

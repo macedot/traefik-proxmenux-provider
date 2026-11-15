@@ -48,6 +48,8 @@ type ProxMenux struct {
 	Timeout          Duration `yaml:"timeout"`
 	MaxResponseBytes int      `yaml:"max_response_bytes"`
 	LANCIDR          string   `yaml:"lan_cidr"` // prefer guest IPs in this subnet (default: provider's /24)
+	Bridge           string   `yaml:"bridge"`   // PVE host adapter whose network guest IPs are matched against (default vmbr0)
+	BridgeResolved   string   `yaml:"-"`        // runtime: host address on that adapter (the CT's default gateway)
 	LANResolved      string   `yaml:"-"`        // runtime-resolved CIDR used by transform
 	OverridesPath    string   `yaml:"-"`        // runtime: <config dir>/overrides.json
 }
@@ -156,7 +158,7 @@ type Config struct {
 func Defaults() *Config {
 	return &Config{
 		Provider:  Provider{PollInterval: Duration(30 * time.Second), LogLevel: "info"},
-		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024},
+		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024, Bridge: "vmbr0"},
 		Domain:    Domain{SlugSource: "watch"},
 		TLS:       TLS{Mode: "internal", CertResolver: "letsencrypt"},
 		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(1200 * time.Millisecond), DefaultEnabled: true},
@@ -230,6 +232,10 @@ func (c *Config) Validate() error {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(c.ProxMenux.LANCIDR)); err != nil {
 			add("proxmenux.lan_cidr: invalid CIDR %q", c.ProxMenux.LANCIDR)
 		}
+	}
+	if name := c.ProxMenux.Bridge; name == "" || len(name) > 15 ||
+		strings.ContainsAny(name, "/\\ 	\n") {
+		add("proxmenux.bridge: must be a valid Linux interface name (max 15 chars)")
 	}
 
 	// domain
