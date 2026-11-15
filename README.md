@@ -15,7 +15,9 @@ per-guest label editing.** Your only inputs: a domain (+ ACME email for
 public TLS).
 
 > **Status: planning.** Architecture decided, no implementation yet — see
-> [Milestones](#milestones). Private during initial development.
+> [Milestones](#milestones). Private during initial development. Working
+> copy: `/root/traefik-proxmenux-provider` on pve-host (dev + build, Go
+> 1.24.4 on the host); no local checkout kept.
 
 ## How it works
 
@@ -157,8 +159,9 @@ anyway.
 
 ## Testing on pve-host (the-traefik-host = traefik, 192.0.2.50, vmbr0)
 
-- **Phase 1 — dry run (no side effects):** cross-compile, push binary into
-  the-traefik-host, `--once --dry-run`, review slugs/targets against live app_watches.
+- **Phase 1 — dry run (no side effects):** build on pve-host (`go build`, Go
+  1.24.4 on the host), `pct push` the binary into the-traefik-host, `--once --dry-run`,
+  review slugs/targets against live app_watches.
 - **Phase 2 — live (`tls.mode: internal`):** install the unit, verify the
   generated file, Traefik dashboard routers, provider dashboard lists every
   route with probe status, `curl --resolve` checks; route count == dry-run

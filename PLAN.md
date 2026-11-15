@@ -1,6 +1,8 @@
 # traefik-proxmenux-provider — Project Plan
 
 > Status: **planning** — no implementation yet (M1+ pending approval).
+> Working copy: `/root/traefik-proxmenux-provider` on pve-host (dev + build,
+> Go 1.24.4 on the host); no local checkout kept.
 
 Convert [NX211/traefik-proxmox-provider](https://github.com/NX211/traefik-proxmox-provider)
 into a ProxMenux-native Traefik auto-routing companion: **every app installed
@@ -174,9 +176,10 @@ config.example.yaml  PLAN.md  README.md  LICENSE  Makefile
 
 Phase 1 — dry run (no side effects):
 ```bash
-# build locally, copy in
-GOOS=linux GOARCH=amd64 go build -o tp-provider ./cmd/provider
-scp tp-provider pve-host:/tmp/ && ssh pve-host 'pct push 300 /tmp/tp-provider /usr/local/bin/'
+# build on pve-host (Go 1.24.4 on the host), push binary into the-traefik-host
+cd /root/traefik-proxmenux-provider
+go build -o /tmp/tp-provider ./cmd/provider
+pct push 300 /tmp/tp-provider /usr/local/bin/tp-provider
 pct exec 300 -- tp-provider --config /tmp/config-test.yaml --once --dry-run
 # review printed YAML: expected slugs from live app_watches, no surprises
 ```
