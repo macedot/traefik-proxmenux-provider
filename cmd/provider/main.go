@@ -294,9 +294,19 @@ func main() {
 // NOTE: interface enumeration needs AF_NETLINK — keep it in the unit's
 // RestrictAddressFamilies or this silently degrades.
 func resolveLAN(cfg *config.Config) error {
+	// explicit CIDR override wins (ProxDnx --network parity)
 	if v := strings.TrimSpace(cfg.ProxMenux.LANCIDR); v != "" {
 		cfg.ProxMenux.LANResolved = v
 		return nil
+	}
+	// Prefer the PVE host's own network: the monitor API runs on the host,
+	// so its IP is a host address. Guests with multiple NICs then match the
+	// host's bridge network first (ProxDnx resolveSubnet parity).
+	if u, err := url.Parse(cfg.ProxMenux.APIURL); err == nil {
+		if ip := net.ParseIP(u.Hostname()); ip != nil && ip.To4() != nil && !ip.IsLoopback() && ip.IsGlobalUnicast() {
+			cfg.ProxMenux.LANResolved = ip.Mask(net.CIDRMask(24, 32)).String() + "/24"
+			return nil
+		}
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {

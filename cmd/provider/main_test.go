@@ -44,3 +44,25 @@ func TestResolveLANExplicit(t *testing.T) {
 		t.Fatalf("LANResolved = %q", cfg.ProxMenux.LANResolved)
 	}
 }
+
+func TestResolveLANHostNetwork(t *testing.T) {
+	// multi-NIC guests: the host's own network (the monitor API address)
+	// wins over the provider CT's interfaces
+	cfg := config.Defaults()
+	cfg.ProxMenux.APIURL = "http://192.0.2.99:8008"
+	cfg.ProxMenux.LANResolved = "203.0.113.0/24" // stale value must be replaced
+	if err := resolveLAN(cfg); err != nil {
+		t.Fatalf("resolveLAN: %v", err)
+	}
+	if cfg.ProxMenux.LANResolved != "192.0.2.0/24" {
+		t.Fatalf("LANResolved = %q, want host subnet 192.0.2.0/24", cfg.ProxMenux.LANResolved)
+	}
+
+	// hostname (unparseable IP) falls back without error
+	cfg2 := config.Defaults()
+	cfg2.ProxMenux.APIURL = "http://monitor.example.com:8008"
+	cfg2.ProxMenux.LANResolved = "203.0.113.0/24"
+	if err := resolveLAN(cfg2); err != nil {
+		t.Fatalf("resolveLAN fallback: %v", err)
+	}
+}

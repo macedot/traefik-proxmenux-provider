@@ -44,8 +44,11 @@ network (probing happens inside it, but is read-only).
 `pickIP(guest, cfg)` chooses the IPv4:
 
 1. Candidates = `ip` + `ips[]` (deduped, IPv4 only, `net.ParseIP`-validated).
-2. If `proxmenux.lan_cidr` (or the runtime-resolved provider subnet) is set,
-   the first candidate inside that CIDR wins.
+2. If a subnet is resolved, the first candidate inside it wins. Resolution
+   order (`resolveLAN`): explicit `proxmenux.lan_cidr` → **the PVE host's
+   own /24** (derived from the monitor API address — the monitor runs on
+   the host, so its IP is a host address; ProxDnx `resolveSubnet` parity)
+   → the provider CT's own /24 as last fallback.
 3. Otherwise the first candidate that is not loopback / not
    CGNAT / docker / link-local (`excludedIP`).
 
