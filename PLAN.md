@@ -191,8 +191,14 @@ Rollback: `systemctl disable --now` unit + `rm conf.d/proxmenux-generated.yaml`
 | Name collisions between apps | Slug dedupe by vmid; optional `include_vmid_suffix` |
 | Traefik dashboard `api.insecure: true` on the-traefik-host | M3 hardening step, user-approved |
 
-## 11. Open questions
+## 11. Decisions (2026-11-15, user-approved)
 
-1. TLS mode for the pve-host test: default `internal` OK? (can switch to `wildcard` later)
-2. Enable monitor API auth + create a dedicated token as part of M3? (recommended)
-3. Fix `api.insecure: true` on the-traefik-host during M3? (recommended)
+1. TLS mode for the pve-host test: **`internal` first** ✓ — public exposure later
+   via `wildcard` (DNS-01); public edge is NPM+ behind CF, per-app TLS-ALPN
+   can't pass through it.
+2. Enable monitor API auth + dedicated token as part of M3: **yes** ✓
+   (currently configured-but-disabled, open on `0.0.0.0:8008`).
+3. Fix `api.insecure: true` on the-traefik-host during M3: **yes** ✓ — replaced by the
+   CIDR-allowlisted dashboard router.
+
+Repository is **private** during initial development (set 2026-11-15).
