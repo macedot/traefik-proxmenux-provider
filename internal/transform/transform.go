@@ -18,26 +18,26 @@ import (
 
 // Route is one publishable app route.
 type Route struct {
-	Slug       string // "adguard-home" (unique after dedupe)
-	Hostname   string // "adguard-home.home.example.com"
-	AppName    string // "AdGuard Home" (display)
-	VMID       int
-	GuestName  string // LXC/VM hostname
-	IP         string
-	Target     string // "http://192.0.2.2:3000"
-	Scheme     string // backend scheme
-	Port       int
-	WebPath    string
-	HealthPath string // "" = none
+	Slug       string `json:"slug"`
+	Hostname   string `json:"hostname"` // "adguard-home.home.example.com"
+	AppName    string `json:"app_name"` // "AdGuard Home" (display)
+	VMID       int    `json:"vmid"`
+	GuestName  string `json:"guest_name"`
+	IP         string `json:"ip"`
+	Target     string `json:"target"` // "http://192.0.2.2:3000"
+	Scheme     string `json:"scheme"`
+	Port       int    `json:"port"`
+	WebPath    string `json:"web_path"`
+	HealthPath string `json:"health_path"` // "" = none
 }
 
 // Skipped records why an app watch was not published (shown on the dashboard).
 type Skipped struct {
-	VMID      int
-	GuestName string
-	AppName   string
-	Slug      string
-	Reason    string
+	VMID      int    `json:"vmid"`
+	GuestName string `json:"guest_name"`
+	AppName   string `json:"app_name"`
+	Slug      string `json:"slug"`
+	Reason    string `json:"reason"`
 }
 
 // Result is the outcome of one transform pass.
