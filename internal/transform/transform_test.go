@@ -248,7 +248,7 @@ func TestPickIPPrefersLanSubnet(t *testing.T) {
 	cfg := base()
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
 	// Arr-style guest: monitor reports the VPN IP first, LAN IP second.
-	g := guest(109, "qbittorrent", "lxc", "198.51.100.33", "running", watch("Qbittorrent", port))
+	g := guest(109, "gluetun-app", "lxc", "198.51.100.33", "running", watch("Qbittorrent", port))
 	g.IPs = []string{"127.0.0.1", "198.51.100.33"}
 	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 {
@@ -283,13 +283,13 @@ func TestSidecarsAreReported(t *testing.T) {
 
 func TestBuildInfraRoutes(t *testing.T) {
 	cfg := base()
-	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99")
+	infra := BuildInfraRoutes(cfg, "pvehost", "192.0.2.99")
 	if len(infra) != 4 {
 		t.Fatalf("infra routes = %d, want 4", len(infra))
 	}
 	want := map[string]string{
-		"pve-host.home.example.com":       "https://192.0.2.99:8006",
-		"pve-host.menux.home.example.com": "http://192.0.2.99:8008",
+		"pvehost.home.example.com":       "https://192.0.2.99:8006",
+		"pvehost.menux.home.example.com": "http://192.0.2.99:8008",
 		"menux.home.example.com":       "http://192.0.2.99:8008",
 		"proxmenux.home.example.com":   "http://192.0.2.99:8008",
 	}
@@ -310,7 +310,7 @@ func TestBuildInfraRoutes(t *testing.T) {
 	}
 	off := *cfg
 	off.Infra.Enabled = false
-	if BuildInfraRoutes(&off, "pve-host", "1.2.3.4") != nil {
+	if BuildInfraRoutes(&off, "pvehost", "1.2.3.4") != nil {
 		t.Error("infra disabled must yield nil")
 	}
 }
@@ -370,7 +370,7 @@ func TestDefaultEnabledConfig(t *testing.T) {
 func TestInfraToggle(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
-	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98")
+	infra := BuildInfraRoutes(cfg, "pvehost", "192.0.2.98")
 	if len(infra) != 4 {
 		t.Fatalf("infra routes = %d, want 4", len(infra))
 	}
