@@ -14,10 +14,20 @@ the raw Proxmox VE API — **no PVE API token, no cluster privileges, no
 per-guest label editing.** Your only inputs: a domain (+ ACME email for
 public TLS).
 
-> **Status: planning.** Architecture decided, no implementation yet — see
-> [Milestones](#milestones). Private during initial development. Working
-> copy: `/root/traefik-proxmenux-provider` on pve-host (dev + build, Go
-> 1.24.4 on the host); no local checkout kept.
+> **Status: implemented** — M1 (core + dashboard) and M2 (packaging) done;
+> running live on the pve-host homelab (the-traefik-host). Working copy:
+> `/root/traefik-proxmenux-provider` on pve-host (dev + build, Go 1.24.4 on
+> the host); no local checkout kept.
+
+## Install (inside the Traefik CT)
+
+```bash
+./install.sh   # asks only for your domain; detects the monitor API; TLS = local CA
+```
+
+Dashboard is **on by default** at `http://<traefik-ct>:8082` (and
+`https://provider.<domain>` via Traefik). If `zz-crowdsec.yml` exists in
+`conf.d`, generated routers automatically chain `crowdsec@file`.
 
 ## How it works
 
@@ -141,6 +151,7 @@ anyway.
 | M | Scope | Status |
 |---|---|---|
 | M0 | Scaffold: PLAN.md, config.example.yaml, README, MIT (derived-from) | ✅ done |
+| M1 | Core Go: config, monitor client, transform, generate, dry-run, embedded read-only dashboard | ✅ done |
 | M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run`, embedded read-only dashboard (HTML + `/api/routes`) + unit tests | planned |
 | M2 | Packaging: hardened systemd unit, `install.sh` / `uninstall.sh` | planned |
 | M3 | Live on pve-host the-traefik-host + hardening: monitor auth + token, `api.insecure` fix | planned |
