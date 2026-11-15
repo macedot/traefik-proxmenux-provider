@@ -67,7 +67,7 @@ Full annotated example: [`config.example.yaml`](../config.example.yaml).
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`<host>.menux`, `menux`, `proxmenux`) on the base domain; toggleable like apps (`infra:<slug>` keys) |
+| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`menux`, `proxmenux`) on the base domain; editable + toggleable like apps (keys `infra:<slug>`) |
 
 ## dashboard
 
@@ -94,12 +94,13 @@ Next to the config, mode 0600, atomic:
 
 ```json
 {
-  "slug_overrides": {"100": "dns"},
-  "domains":       {"100": "example.org"},
-  "disabled":      {"100": true, "infra:menux": false}
+  "slug_overrides": {"100": "dns", "infra:menux": "proxmox"},
+  "domains":        {"100": "example.org"},
+  "disabled":       {"100": true, "infra:menux": false}
 }
 ```
 
-Keys are vmids (apps) or `infra:<slug>` (infra entries). Values in
-`disabled` are **explicit states** (`true` = off, `false` = on); a missing
-key falls back to `routing.default_enabled`.
+Keys are vmids (apps) or `infra:<default-slug>` (infra entries — the key is
+stable even after a rename; edits change the rendered slug/hostname only).
+Values in `disabled` are **explicit states** (`true` = off, `false` = on); a
+missing key falls back to `routing.default_enabled`.

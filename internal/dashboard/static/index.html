@@ -107,6 +107,9 @@ function startEdit(card,x,link){
     if(ev.key==="Enter"){ev.preventDefault();save.onclick();}
     else if(ev.key==="Escape"){ev.preventDefault();cancel.onclick();}
   };
+  // the stable identity: infra uses key ("infra:<slug>"), apps use vmid
+  const identBody=()=>({key:x.key||undefined,vmid:x.key?undefined:x.vmid,slug:inp.value,domain:sel.value});
+  const identFind=(rs)=>rs.find(v=>x.key?v.key===x.key:(v.kind==="app"&&v.vmid===x.vmid));
   // picking a domain applies immediately: gray + pulse the card until the
   // route is republished under the new domain
   sel.onchange=async()=>{
@@ -114,13 +117,13 @@ function startEdit(card,x,link){
     card.classList.add("editing"); // gray + pulse until updated
     sel.disabled=true;save.disabled=true;def.disabled=true;save.textContent="⟳ syncing";
     const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({vmid:x.vmid,slug:inp.value,domain:sel.value})});
+      body:JSON.stringify(identBody())});
     if(!r.ok){const j=await r.json().catch(()=>({}));
       card.classList.remove("editing");sel.disabled=false;save.disabled=false;def.disabled=false;
       save.textContent=j.error||"error";return}
     const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const want=slug+"."+sel.value;
-    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname===want});
+    await waitSync(rs=>{const rt=identFind(rs);return !!rt&&rt.hostname===want});
     EDITING=false;load();
   };
   row.append(inp,sel);
@@ -132,20 +135,20 @@ function startEdit(card,x,link){
     if(save.disabled)return;
     save.disabled=true;save.textContent="⟳ syncing";
     const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({vmid:x.vmid,slug:inp.value,domain:sel.value})});
+      body:JSON.stringify(identBody())});
     if(!r.ok){const j=await r.json().catch(()=>({}));save.disabled=false;save.textContent=j.error||"error";return}
     // server slugifies; mirror it to detect the republished hostname
     const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const want=slug+"."+sel.value;
-    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname===want});
+    await waitSync(rs=>{const rt=identFind(rs);return !!rt&&rt.hostname===want});
     EDITING=false;load();
   };
   def.onclick=async()=>{
     if(def.disabled)return;
     def.disabled=true;def.textContent="⟳ syncing";
     await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({vmid:x.vmid})});
-    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname!==x.hostname});
+      body:JSON.stringify(identBody())});
+    await waitSync(rs=>{const rt=identFind(rs);return !!rt&&rt.hostname!==x.hostname});
     EDITING=false;load();
   };
   cancel.onclick=()=>{EDITING=false;load();};
@@ -213,7 +216,7 @@ async function load(){
         // click-count detection (ev.detail===2) is steadier than the native
         // dblclick event; links and the edit row are exempt
         c.addEventListener("click",(ev)=>{
-          if(ev.target.closest("a")||ev.target.closest(".editrow"))return;
+          if(ev.target.closest("a")||ev.target.closest(".ebtn")||ev.target.closest(".editrow"))return;
           if(ev.detail===2)startEdit(c,x,link);
         });
         // keyboard: Enter/F2 on the focused card edits; keys on children
@@ -282,6 +285,20 @@ async function load(){
           // infra cards: rebuild just the infra grid (small, keeps alignment)
           load();
         };
+      }
+      // infra cards are editable like apps (slug + domain); stable key
+      if(s.edit_enabled&&!r.stale){
+        const link=c.querySelector("a.domain");
+        c.title="double-click (or Enter) to edit the URL name";
+        c.tabIndex=0;
+        c.addEventListener("click",(ev)=>{
+          if(ev.target.closest("a")||ev.target.closest(".ebtn")||ev.target.closest(".editrow"))return;
+          if(ev.detail===2)startEdit(c,r,link);
+        });
+        c.addEventListener("keydown",(ev)=>{
+          if(ev.target!==c)return;
+          if(ev.key==="Enter"||ev.key==="F2"){ev.preventDefault();startEdit(c,r,link);}
+        });
       }
       sg.appendChild(c);
       views.set(r.key,c);

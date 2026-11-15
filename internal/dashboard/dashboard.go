@@ -86,14 +86,22 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		}
 		var req struct {
 			VMID   int    `json:"vmid"`
+			Key    string `json:"key"` // infra entries ("infra:<slug>"); vmid otherwise
 			Slug   string `json:"slug"`
 			Domain string `json:"domain"` // optional: pick from cfg domains; empty = default
 		}
-		if err := json.Unmarshal(body, &req); err != nil || req.VMID <= 0 {
-			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid required"})
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
 			return
 		}
-		key := strconv.Itoa(req.VMID)
+		ident := req.Key
+		if ident == "" && req.VMID > 0 {
+			ident = strconv.Itoa(req.VMID)
+		}
+		if ident == "" || len(ident) > 64 || strings.ContainsAny(ident, "/\\ 	\n") {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid or key required"})
+			return
+		}
 		if req.Domain != "" {
 			okDomain := false
 			for _, d := range o.Domains {
@@ -114,31 +122,31 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 				writeJSON(http.StatusBadRequest, map[string]string{"error": "slug must contain alphanumeric characters"})
 				return
 			}
-			if err := o.Store.SetSlug(key, slug); err != nil {
+			if err := o.Store.SetSlug(ident, slug); err != nil {
 				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
 			domainSet := ""
 			if req.Domain != "" {
-				if err := o.Store.SetDomain(key, req.Domain); err != nil {
+				if err := o.Store.SetDomain(ident, req.Domain); err != nil {
 					writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 					return
 				}
 				domainSet = req.Domain
 			} else {
-				_, _ = o.Store.ClearDomain(key) // empty = back to the default domain
+				_, _ = o.Store.ClearDomain(ident) // empty = back to the default domain
 			}
 			signalResync(o)
-			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "slug": slug, "domain": domainSet})
+			writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "slug": slug, "domain": domainSet})
 		case http.MethodDelete:
-			existed, err := o.Store.ClearSlug(key)
+			existed, err := o.Store.ClearSlug(ident)
 			if err != nil {
 				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			_, _ = o.Store.ClearDomain(key)
+			_, _ = o.Store.ClearDomain(ident)
 			signalResync(o)
-			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "cleared": existed})
+			writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "cleared": existed})
 		}
 	})
 	mux.HandleFunc("/api/enabled", func(w http.ResponseWriter, r *http.Request) {

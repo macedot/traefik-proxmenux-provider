@@ -288,8 +288,8 @@ func TestSidecarsAreReported(t *testing.T) {
 func TestBuildInfraRoutes(t *testing.T) {
 	cfg := base()
 	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99")
-	if len(infra) != 4 {
-		t.Fatalf("infra routes = %d, want 4", len(infra))
+	if len(infra) != 3 {
+		t.Fatalf("infra routes = %d, want 3 (pve + menux + proxmenux)", len(infra))
 	}
 	want := map[string]string{
 		"pve-host.home.example.com":       "https://192.0.2.99:8006",
@@ -375,8 +375,8 @@ func TestInfraToggle(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
 	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98")
-	if len(infra) != 4 {
-		t.Fatalf("infra routes = %d, want 4", len(infra))
+	if len(infra) != 3 {
+		t.Fatalf("infra routes = %d, want 3 (pve + menux + proxmenux)", len(infra))
 	}
 
 	// default_enabled=false: all infra disabled, keys present.
@@ -472,5 +472,34 @@ func TestProbeRouteTLS(t *testing.T) {
 	ProbeRoute(&r3, time.Second)
 	if r3.Served || !r3.Stale {
 		t.Fatalf("closed port must be stale: %+v", r3)
+	}
+}
+
+func TestApplyInfraEdits(t *testing.T) {
+	cfg := base()
+	cfg.Routing.Probe = false
+	infra := BuildInfraRoutes(cfg, "pvehost", "192.0.2.99")
+	slugs := map[string]string{"infra:menux": "prox-ui"}
+	domains := map[string]string{"infra:menux": "alt.example.com"}
+	ApplyInfraEdits(infra, slugs, domains)
+
+	var m Route
+	for _, r := range infra {
+		if r.Key == "infra:menux" {
+			m = r
+		}
+	}
+	if m.Slug != "prox-ui" || m.Domain != "alt.example.com" || m.Hostname != "prox-ui.alt.example.com" {
+		t.Fatalf("edits not applied: %+v", m)
+	}
+	// key stays stable (identity) even after the rename
+	if m.Key != "infra:menux" {
+		t.Fatalf("key changed: %q", m.Key)
+	}
+	// untouched entry keeps built hostname
+	for _, r := range infra {
+		if r.Key == "infra:pvehost" && r.Hostname != "pvehost.home.example.com" {
+			t.Fatalf("untouched entry changed: %+v", r)
+		}
 	}
 }

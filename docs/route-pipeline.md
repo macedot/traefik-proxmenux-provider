@@ -98,7 +98,9 @@ otherwise `!routing.default_enabled`.
   health-check (`path` from `web_path`, 30s interval) when
   `routing.health_check`; `insecure` routes reference `pmp-insecure`.
 - infra entries render identically (kind `infra`), incl. `pmp-insecure`
-  for the PVE UI (`https://<host>:8006`).
+  for the PVE UI (`https://<host>:8006`). They are editable: `ApplyInfraEdits`
+  applies slug renames and domain picks keyed by the stable
+  `infra:<default-slug>` identity, then rebuilds the hostname.
 - the provider dashboard route is emitted **only** when
   `dashboard.via_traefik` AND `dashboard.allow_cidrs` are both set —
   fail-closed (see [security.md](security.md)).

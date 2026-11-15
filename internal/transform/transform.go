@@ -296,7 +296,8 @@ func mergePorts(g proxmenux.Guest, extras []ServicePort) []ServicePort {
 
 // BuildInfraRoutes builds the static infrastructure routes on the provider
 // domain, mirroring ProxDnx's static entries: <host> (PVE UI :8006) and the
-// ProxMenux UI on <host>.menux / menux / proxmenux (:8008).
+// ProxMenux UI on menux / proxmenux (:8008). Entries are editable (slug +
+// domain) with the stable key "infra:<default-slug>".
 func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 	if !cfg.Infra.Enabled || host == "" || apiIP == "" {
 		return nil
@@ -304,11 +305,10 @@ func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 	port := cfg.ProxMenux.MonitorPort()
 	base := "http://" + apiIP + ":" + strconv.Itoa(port)
 	menux := []Route{
-		{Slug: host + "-menux", Hostname: host + ".menux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
-		{Slug: "menux", Hostname: "menux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
+		{Slug: "menux", Hostname: "menux." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
 		{Slug: "proxmenux", Hostname: "proxmenux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
 	}
-	pve := Route{Slug: host, Hostname: host + "." + cfg.Domain.Base, AppName: "Proxmox VE", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "https", Port: 8006, Insecure: true,
+	pve := Route{Slug: host, Hostname: host + "." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "Proxmox VE", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "https", Port: 8006, Insecure: true,
 		Target: "https://" + apiIP + ":8006"}
 	out := append([]Route{pve}, menux...)
 	for i := range out {
@@ -316,6 +316,31 @@ func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 		out[i].Key = "infra:" + out[i].Slug
 	}
 	return out
+}
+
+// ApplyInfraEdits applies dashboard/config edits to infrastructure routes:
+// slug renames and domain picks, both keyed by the stable Key
+// ("infra:<default-slug>"). The Hostname is rebuilt from slug + domain.
+// Run before ApplyToggle (toggle keys are unaffected by renames).
+func ApplyInfraEdits(routes []Route, slugOverrides, routeDomains map[string]string) {
+	for i := range routes {
+		r := &routes[i]
+		if r.Kind != "infra" || r.Key == "" {
+			continue
+		}
+		if s, ok := slugOverrides[r.Key]; ok && s != "" {
+			if slug := Slugify(s); slug != "" {
+				r.Slug = slug
+			}
+		}
+		if d, ok := routeDomains[r.Key]; ok && d != "" {
+			r.Domain = d
+		}
+		if r.Domain == "" {
+			continue // domain not tracked: keep the built hostname
+		}
+		r.Hostname = r.Slug + "." + r.Domain
+	}
 }
 
 // ApplyToggle applies the per-route on/off state to infrastructure

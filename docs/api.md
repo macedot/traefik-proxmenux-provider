@@ -57,7 +57,10 @@ grayed instead of pretending they vanished.
 
 ## POST /api/slug
 
-`{"vmid": 100, "slug": "dns", "domain": "example.org"}`
+`{"vmid": 100, "slug": "dns", "domain": "example.org"}` — apps, or
+`{"key": "infra:menux", "slug": "proxmox", "domain": "example.org"}` —
+infrastructure entries (the key is the stable `infra:<default-slug>`
+identity; a rename does not change it).
 
 - `slug` is slugified server-side; must contain at least one alphanumeric
 - `domain` optional; must be in the configured domain list; empty resets
