@@ -192,8 +192,8 @@ func Render(routes []transform.Route, cfg *config.Config) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal dynamic config: %w", err)
 	}
-	buf.WriteString(header)
-	buf.Write(out)
+	_, _ = buf.WriteString(header)
+	_, _ = buf.Write(out)
 	return buf.Bytes(), nil
 }
 
@@ -212,16 +212,16 @@ func listenPort(listen string) (int, error) {
 // WriteAtomic writes data to path atomically. Returns whether the file
 // changed. Never touches anything besides path and path+".bak".
 func WriteAtomic(path string, mode os.FileMode, backup bool, data []byte) (bool, error) {
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) { // #nosec G304 -- output path from admin-controlled config
 		return false, nil
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return false, fmt.Errorf("create output dir: %w", err)
 	}
 	if backup {
-		if old, err := os.ReadFile(path); err == nil {
-			if err := os.WriteFile(path+".bak", old, mode); err != nil {
+		if old, err := os.ReadFile(path); err == nil { // #nosec G304 -- output path from admin-controlled config
+			if err := os.WriteFile(path+".bak", old, mode); err != nil { // #nosec G703 -- derived from the same admin-controlled path
 				return false, fmt.Errorf("write backup: %w", err)
 			}
 		}
@@ -231,7 +231,7 @@ func WriteAtomic(path string, mode os.FileMode, backup bool, data []byte) (bool,
 		return false, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after successful rename
+	defer func() { _ = os.Remove(tmpName) }() // no-op after successful rename
 
 	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()

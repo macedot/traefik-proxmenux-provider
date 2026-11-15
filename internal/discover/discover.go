@@ -66,7 +66,7 @@ func probe(ctx context.Context, client *http.Client, host string, port int, path
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	url := fmt.Sprintf("http://%s:%d%s", host, port, path)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

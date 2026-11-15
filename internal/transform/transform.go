@@ -220,7 +220,7 @@ func probe(host string, port int, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	conn.Close()
+	_ = conn.Close()
 	return nil
 }
 

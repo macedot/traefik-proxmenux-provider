@@ -121,7 +121,7 @@ func Defaults() *Config {
 }
 
 func Load(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path comes from the admin-controlled config/flag
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}

@@ -152,9 +152,8 @@ anyway.
 |---|---|---|
 | M0 | Scaffold: PLAN.md, config.example.yaml, README, MIT (derived-from) | ✅ done |
 | M1 | Core Go: config, monitor client, transform, generate, dry-run, embedded read-only dashboard | ✅ done |
-| M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run`, embedded read-only dashboard (HTML + `/api/routes`) + unit tests | planned |
-| M2 | Packaging: hardened systemd unit, `install.sh` / `uninstall.sh` | planned |
-| M3 | Live on pve-host the-traefik-host + hardening: monitor auth + token, `api.insecure` fix | planned |
+| M2 | Packaging: hardened systemd unit, `install.sh` / `uninstall.sh` | ✅ done |
+| M3 | Live on pve-host the-traefik-host + hardening: monitor auth + token, `api.insecure` fix | ✅ live (12 routes) · hardening pending |
 | M4 | CI, docs, goreleaser `v0.1.0` | planned |
 | M5 | (optional, later) ProxMenux OCI catalog entry: one-click traefik+provider stack | planned |
 
