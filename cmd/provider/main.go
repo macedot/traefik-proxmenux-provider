@@ -148,6 +148,7 @@ func main() {
 
 		// Dashboard edits (overrides file) win over config slug_overrides.
 		disabled := map[string]bool{}
+		routeDomains := map[string]string{}
 		if ov, oerr := store.Load(); oerr != nil {
 			logger.Warn("overrides load failed", "err", oerr)
 		} else {
@@ -159,13 +160,18 @@ func main() {
 				merged[k] = v
 			}
 			cfg.Domain.SlugOverrides = merged
+			for k, v := range ov.Domains {
+				if v != "" {
+					routeDomains[k] = v
+				}
+			}
 			for k, v := range ov.Disabled {
 				if v {
 					disabled[k] = true
 				}
 			}
 		}
-		result := transform.Transform(guests, extras, disabled, cfg)
+		result := transform.Transform(guests, extras, disabled, routeDomains, cfg)
 
 		// Static infra entries (ProxDnx parity): <host> (PVE UI) and the
 		// ProxMenux UI names, derived from the monitor hostname + api host.
@@ -218,6 +224,7 @@ func main() {
 		snap.Entrypoint = cfg.Routing.Entrypoint
 		snap.AuthMode = string(authMode)
 		snap.EditEnabled = cfg.Dashboard.Edit
+		snap.Domains = cfg.Domain.All()
 		snap.GeneratedAt = time.Now()
 		snap.NextSyncAt = time.Now().Add(cfg.Provider.PollInterval.Std())
 		snap.Routes = result.Routes
@@ -232,7 +239,7 @@ func main() {
 
 	if cfg.Dashboard.Enabled && !*dryRun {
 		go func() {
-			opts := dashboard.Options{Edit: cfg.Dashboard.Edit, Store: store, Resync: resyncC}
+			opts := dashboard.Options{Edit: cfg.Dashboard.Edit, Store: store, Resync: resyncC, Domains: cfg.Domain.All()}
 			if err := dashboard.Serve(ctx, cfg.Dashboard.Listen, holder, opts, logger); err != nil {
 				logger.Error("dashboard stopped", "err", err)
 			}

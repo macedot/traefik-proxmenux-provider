@@ -24,6 +24,9 @@ proxmenux:
 
 domain:
   base: home.example.com      # REQUIRED: every app becomes <slug>.base
+                              # this is also the DEFAULT domain
+  # alternates:               # extra domains pickable per app in the
+  #   - alt.example.com       # dashboard edit dialog (first = default)
   slug_source: watch          # watch    = app name ("AdGuard Home" -> adguard-home)
                               # hostname = LXC/VM hostname
   # slug_overrides:           # optional manual slug fixes, keyed by vmid or name

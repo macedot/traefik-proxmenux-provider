@@ -24,6 +24,7 @@ import (
 type Route struct {
 	Slug       string `json:"slug"`
 	Hostname   string `json:"hostname"`
+	Domain     string `json:"domain"` // the domain part of the URL (per-app pick)
 	AppName    string `json:"app_name"`
 	Kind       string `json:"kind"` // app | infra
 	VMID       int    `json:"vmid"`
@@ -97,8 +98,9 @@ func ReservedHostnames(cfg *config.Config) map[string]bool {
 
 // Transform filters guests and service ports into routes (ProxDnx
 // semantics). Stale and disabled routes are flagged (visible on the
-// dashboard), never silently dropped. disabled is keyed by vmid string.
-func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled map[string]bool, cfg *config.Config) *Result {
+// dashboard), never silently dropped. disabled is keyed by vmid string;
+// routeDomains maps vmid → the domain the app URL uses ("" = default).
+func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled map[string]bool, routeDomains map[string]string, cfg *config.Config) *Result {
 	res := &Result{}
 	reserved := ReservedHostnames(cfg)
 
@@ -153,15 +155,29 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 			if slug == "" {
 				continue
 			}
-			hostname := slug
-			if seenHost[hostname] {
-				hostname = fmt.Sprintf("%s-%d", slug, g.VMID)
+			// Hostname is slug + the app's domain (per-vmid override or default).
+			appDomain := routeDomains[strconv.Itoa(g.VMID)]
+			if appDomain == "" {
+				appDomain = cfg.Domain.Base
 			}
-			if seenHost[hostname] {
+			hostname := slug
+			full := hostname + "." + appDomain
+			if seenHost[full] {
+				hostname = fmt.Sprintf("%s-%d", slug, g.VMID)
+				full = hostname + "." + appDomain
+			}
+			if seenHost[full] {
 				skip("slug collision")
 				continue
 			}
-			seenHost[hostname] = true
+			seenHost[full] = true
+
+			// Reserved labels apply on the primary domain, where the infra
+			// entries and dashboards live.
+			if reserved[strings.ToLower(slug)] && appDomain == cfg.Domain.Base {
+				skip("hostname reserved")
+				continue
+			}
 
 			if deny[strings.ToLower(slug)] {
 				skip("denied by expose.deny")
@@ -171,14 +187,11 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				skip("not in expose.allow")
 				continue
 			}
-			if reserved[strings.ToLower(slug)] {
-				skip("hostname reserved")
-				continue
-			}
 
 			route := Route{
 				Slug:      hostname,
-				Hostname:  hostname + "." + cfg.Domain.Base,
+				Hostname:  full,
+				Domain:    appDomain,
 				AppName:   sp.Name,
 				Kind:      "app",
 				VMID:      g.VMID,

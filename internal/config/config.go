@@ -71,9 +71,24 @@ func (p ProxMenux) MonitorPort() int {
 
 type Domain struct {
 	Base              string            `yaml:"base"`
+	Alternates        []string          `yaml:"alternates"` // pickable in the dashboard edit dialog; Base is the default
 	SlugSource        string            `yaml:"slug_source"`
 	SlugOverrides     map[string]string `yaml:"slug_overrides"`
 	IncludeVMIDSuffix bool              `yaml:"include_vmid_suffix"`
+}
+
+// All returns every usable domain, Base first (the default).
+func (d Domain) All() []string {
+	out := []string{d.Base}
+	seen := map[string]bool{d.Base: true}
+	for _, a := range d.Alternates {
+		a = strings.TrimSpace(a)
+		if a != "" && !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 type TLS struct {
@@ -219,6 +234,11 @@ func (c *Config) Validate() error {
 	// domain
 	if err := validateHostname(c.Domain.Base); err != nil {
 		add("domain.base: %v", err)
+	}
+	for _, a := range c.Domain.Alternates {
+		if err := validateHostname(strings.TrimSpace(a)); err != nil {
+			add("domain.alternates: %v", err)
+		}
 	}
 	switch c.Domain.SlugSource {
 	case "watch", "hostname":

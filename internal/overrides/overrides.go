@@ -12,6 +12,7 @@ import (
 
 type File struct {
 	SlugOverrides map[string]string `json:"slug_overrides"`
+	Domains       map[string]string `json:"domains"`  // vmid -> URL domain (per-app pick)
 	Disabled      map[string]bool   `json:"disabled"` // vmid -> app toggle off
 }
 
@@ -45,10 +46,40 @@ func (s *Store) loadLocked() (File, error) {
 	if f.SlugOverrides == nil {
 		f.SlugOverrides = map[string]string{}
 	}
+	if f.Domains == nil {
+		f.Domains = map[string]string{}
+	}
 	if f.Disabled == nil {
 		f.Disabled = map[string]bool{}
 	}
 	return f, nil
+}
+
+// SetDomain stores the URL domain pick for a vmid (validated by the caller).
+func (s *Store) SetDomain(vmid, domain string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	f.Domains[vmid] = domain
+	return s.saveLocked(f)
+}
+
+// ClearDomain removes a domain pick; returns whether one existed.
+func (s *Store) ClearDomain(vmid string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return false, err
+	}
+	if _, ok := f.Domains[vmid]; !ok {
+		return false, nil
+	}
+	delete(f.Domains, vmid)
+	return true, s.saveLocked(f)
 }
 
 // SetDisabled toggles an app on/off by vmid. disabled=false removes the key.

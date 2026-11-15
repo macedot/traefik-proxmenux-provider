@@ -82,14 +82,28 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 			return
 		}
 		var req struct {
-			VMID int    `json:"vmid"`
-			Slug string `json:"slug"`
+			VMID   int    `json:"vmid"`
+			Slug   string `json:"slug"`
+			Domain string `json:"domain"` // optional: pick from cfg domains; empty = default
 		}
 		if err := json.Unmarshal(body, &req); err != nil || req.VMID <= 0 {
 			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid required"})
 			return
 		}
 		key := strconv.Itoa(req.VMID)
+		if req.Domain != "" {
+			okDomain := false
+			for _, d := range o.Domains {
+				if d == req.Domain {
+					okDomain = true
+					break
+				}
+			}
+			if !okDomain {
+				writeJSON(http.StatusBadRequest, map[string]string{"error": "domain not in the configured list"})
+				return
+			}
+		}
 		switch r.Method {
 		case http.MethodPost:
 			slug := transform.Slugify(req.Slug)
@@ -101,14 +115,25 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
+			domainSet := ""
+			if req.Domain != "" {
+				if err := o.Store.SetDomain(key, req.Domain); err != nil {
+					writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				domainSet = req.Domain
+			} else {
+				_, _ = o.Store.ClearDomain(key) // empty = back to the default domain
+			}
 			signalResync(o)
-			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "slug": slug})
+			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "slug": slug, "domain": domainSet})
 		case http.MethodDelete:
 			existed, err := o.Store.ClearSlug(key)
 			if err != nil {
 				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
+			_, _ = o.Store.ClearDomain(key)
 			signalResync(o)
 			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "cleared": existed})
 		}
@@ -163,9 +188,10 @@ func signalResync(o Options) {
 
 // Options wires the dashboard to the provider runtime.
 type Options struct {
-	Edit   bool             // allow slug edits (POST/DELETE /api/slug)
-	Store  *overrides.Store // overrides persistence (required when Edit)
-	Resync chan struct{}    // signalled after a successful edit
+	Edit    bool             // allow slug edits (POST/DELETE /api/slug)
+	Store   *overrides.Store // overrides persistence (required when Edit)
+	Resync  chan struct{}    // signalled after a successful edit
+	Domains []string         // pickable URL domains (Base first)
 }
 
 // Serve runs the dashboard until ctx is cancelled.

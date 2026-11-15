@@ -60,20 +60,28 @@ function esc(s){const d=document.createElement("div");d.textContent=s==null?"":S
 function proto(){return location.protocol}
 // click-to-edit: rename the published URL (service name never changes);
 // auto-refresh pauses while an edit is open
-let EDITING=false;
+let EDITING=false;let sDomains=[];
 function startEdit(card,x,link){
   if(EDITING)return;EDITING=true;
   const row=document.createElement("div");row.className="editrow";
   const inp=document.createElement("input");inp.className="nameinput";
   inp.value=x.slug;inp.maxLength=63;inp.autocomplete="off";inp.spellcheck=false;
-  row.appendChild(inp);
+  // domain picker: first configured domain is the default; a per-app pick
+  // is stored in overrides and wins over the config default
+  const sel=document.createElement("select");sel.className="nameinput";sel.style.marginTop="6px";
+  (sDomains||[]).forEach(d=>{
+    const o=document.createElement("option");o.value=d;o.textContent="."+d;
+    if(d===x.domain)o.selected=true;sel.appendChild(o);
+  });
+  if((sDomains||[]).length<2)sel.style.display="none";
+  row.append(inp,sel);
   const actions=document.createElement("div");actions.className="editactions";
   const save=document.createElement("button");save.className="ebtn save";save.textContent="✓ save";
   const def=document.createElement("button");def.className="ebtn";def.textContent="↺ default";
   const cancel=document.createElement("button");cancel.className="ebtn";cancel.textContent="✕ discard";
   save.onclick=async()=>{
     const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({vmid:x.vmid,slug:inp.value})});
+      body:JSON.stringify({vmid:x.vmid,slug:inp.value,domain:sel.value})});
     if(!r.ok){const j=await r.json().catch(()=>({}));save.textContent=j.error||"error";return}
     EDITING=false;load();
   };
@@ -148,6 +156,7 @@ async function load(){
     document.getElementById("updated").textContent=new Date(s.generated_at).toLocaleString();
     document.getElementById("authmode").textContent=s.auth_mode?"monitor auth: "+s.auth_mode:"";
     document.getElementById("ver").textContent=s.version||"dev";
+    sDomains=s.domains||[];
     // infrastructure section (ProxDnx parity: static entries, not editable)
     const sg=document.getElementById("staticgrid");
     sg.innerHTML="";
