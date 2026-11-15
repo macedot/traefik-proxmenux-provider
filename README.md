@@ -2,7 +2,7 @@
 
 **One HTTPS route per ProxMenux app, with zero per-app configuration.**
 
-A companion service for the [ProxMenux](https://github.com/MacRaisin/ProxMenux)
+A companion service for the [ProxMenux](https://github.com/MacRimi/ProxMenux)
 Traefik OCI app: it watches the ProxMenux monitor API and automatically
 generates Traefik routes for every OCI-managed app. Install an app in
 ProxMenux → `https://<app>.<your-domain>` works seconds later. Remove the
