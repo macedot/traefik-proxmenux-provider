@@ -225,3 +225,40 @@ func TestEnabledEndpoint(t *testing.T) {
 		t.Fatalf("expected explicit enabled (false), got: %+v", f2.Disabled)
 	}
 }
+
+func TestDomainInfraSwitches(t *testing.T) {
+	h := state.New("t")
+	store := overrides.Open(filepath.Join(t.TempDir(), "overrides.json"))
+	resync := make(chan struct{}, 2)
+	srv := httptest.NewServer(NewMux(h, Options{Edit: true, Store: store, Resync: resync, Domains: []string{"a.example.com", "b.example.com"}}))
+	defer srv.Close()
+
+	// domain switch requires a configured domain
+	resp, _ := srv.Client().Post(srv.URL+"/api/domain", "application/json",
+		strings.NewReader(`{"domain":"nope.example.com","disabled":true}`))
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("unknown domain must 400, got %d", resp.StatusCode)
+	}
+	resp, _ = srv.Client().Post(srv.URL+"/api/domain", "application/json",
+		strings.NewReader(`{"domain":"a.example.com","disabled":true}`))
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("domain off: %d", resp.StatusCode)
+	}
+	resp, _ = srv.Client().Post(srv.URL+"/api/infra", "application/json",
+		strings.NewReader(`{"disabled":true}`))
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("infra off: %d", resp.StatusCode)
+	}
+	f, _ := store.Load()
+	if !f.DomainsOff["a.example.com"] || !f.InfraOff {
+		t.Fatalf("switches not persisted: %+v", f)
+	}
+	select {
+	case <-resync:
+	default:
+		t.Error("resync not signalled")
+	}
+}

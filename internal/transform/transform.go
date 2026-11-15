@@ -102,8 +102,9 @@ func ReservedHostnames(cfg *config.Config) map[string]bool {
 // Transform filters guests and service ports into routes (ProxDnx
 // semantics). Stale and disabled routes are flagged (visible on the
 // dashboard), never silently dropped. disabled is keyed by vmid string;
-// routeDomains maps vmid → the domain the app URL uses ("" = default).
-func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled map[string]bool, routeDomains map[string]string, cfg *config.Config) *Result {
+// routeDomains maps vmid → the domain the app URL uses ("" = default);
+// domainOff is a per-domain global multiplier (whole domain off).
+func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled map[string]bool, routeDomains map[string]string, domainOff map[string]bool, cfg *config.Config) *Result {
 	res := &Result{}
 	reserved := ReservedHostnames(cfg)
 
@@ -209,7 +210,8 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 
 			// Per-app on/off toggle: card stays visible, route not served.
 			// Explicit per-app state wins; absent key = config default
-			// (routing.default_enabled). Map values: true = off, false = on.
+			// (routing.default_enabled). A domain-level off multiplies on
+			// top (the app state itself is untouched).
 			var isDisabled bool
 			if v, explicit := disabled[strconv.Itoa(g.VMID)]; explicit {
 				isDisabled = v
@@ -221,6 +223,11 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				route.Served = false
 				res.Routes = append(res.Routes, route)
 				continue
+			}
+			if domainOff[appDomain] {
+				route.Served = false
+				res.Routes = append(res.Routes, route)
+				continue // not probed: domain is off, re-probed on re-enable
 			}
 
 			candidates = append(candidates, candidate{route: route})
@@ -345,8 +352,9 @@ func ApplyInfraEdits(routes []Route, slugOverrides, routeDomains map[string]stri
 
 // ApplyToggle applies the per-route on/off state to infrastructure
 // routes (apps are handled inside Transform). Explicit state wins;
-// absent keys follow cfg.Routing.DefaultEnabled.
-func ApplyToggle(routes []Route, disabled map[string]bool, cfg *config.Config) {
+// absent keys follow cfg.Routing.DefaultEnabled. The global infra
+// switch and the entry's domain switch multiply on top.
+func ApplyToggle(routes []Route, disabled map[string]bool, domainOff map[string]bool, infraOff bool, cfg *config.Config) {
 	for i := range routes {
 		r := &routes[i]
 		if r.Kind != "infra" || r.Key == "" {
@@ -357,6 +365,9 @@ func ApplyToggle(routes []Route, disabled map[string]bool, cfg *config.Config) {
 			off = v
 		} else {
 			off = !cfg.Routing.DefaultEnabled
+		}
+		if infraOff || domainOff[r.Domain] {
+			off = true
 		}
 		r.Disabled = off
 		r.Served = !off && !r.Stale

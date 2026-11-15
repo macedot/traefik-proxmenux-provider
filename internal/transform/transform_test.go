@@ -71,7 +71,7 @@ func TestTransformHappyPath(t *testing.T) {
 	cfg := base()
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
 	g := guest(100, "adguard", "lxc", "127.0.0.1", "running", watch("AdGuard Home", port))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 
 	if len(res.Routes) != 1 {
 		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
@@ -95,7 +95,7 @@ func TestVmsAreSkippedSilently(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
 	g := guest(400, "algo", "qemu", "127.0.0.1", "running", watch("ALGO", 80))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 0 || len(res.Skipped) != 0 {
 		t.Fatalf("vm guest must be ignored: %+v %+v", res.Routes, res.Skipped)
 	}
@@ -105,7 +105,7 @@ func TestStaleIsTaggedNotDropped(t *testing.T) {
 	cfg := base()
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
 	g := guest(117, "dead", "lxc", "127.0.0.1", "running", watch("Dead App", 1))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 {
 		t.Fatalf("stale route must stay visible: %+v", res.Skipped)
 	}
@@ -122,7 +122,7 @@ func TestProbeDisabledServesEverything(t *testing.T) {
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
 	cfg.Routing.Probe = false
 	g := guest(117, "dead", "lxc", "127.0.0.1", "running", watch("Dead App", 1))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Stale || !res.Routes[0].Served {
 		t.Fatalf("probe off: %+v", res.Routes)
 	}
@@ -134,7 +134,7 @@ func TestSkipReasons(t *testing.T) {
 		guest(113, "plex", "lxc", "10.0.0.9", "stopped", watch("Plex", 32400)),
 		guest(116, "noports", "lxc", "10.0.0.11", "running", proxmenux.Watch{Name: "X", InstalledVia: "oci_image"}),
 	}
-	res := Transform(guests, nil, nil, nil, cfg)
+	res := Transform(guests, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 0 {
 		t.Fatalf("routes = %d, want 0", len(res.Routes))
 	}
@@ -159,7 +159,7 @@ func TestCollisionDedupe(t *testing.T) {
 	cfg.Routing.Probe = false
 	g1 := guest(100, "a1", "lxc", "10.0.0.1", "running", watch("Same App", 80))
 	g2 := guest(200, "a2", "lxc", "10.0.0.2", "running", watch("Same App", 80))
-	res := Transform([]proxmenux.Guest{g1, g2}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g1, g2}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 2 {
 		t.Fatalf("routes = %d, want 2", len(res.Routes))
 	}
@@ -181,7 +181,7 @@ func TestDiscoveryExtrasAndIPPortDedupe(t *testing.T) {
 		193: {{Name: "dockhand", Port: 3000, Scheme: "http", Source: "docker"}},
 	}
 	g := guest(193, "docker", "lxc", "10.0.0.193", "running")
-	res := Transform([]proxmenux.Guest{g}, extras, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, extras, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Slug != "dockhand" {
 		t.Fatalf("discovery route wrong: %+v", res.Routes)
 	}
@@ -189,7 +189,7 @@ func TestDiscoveryExtrasAndIPPortDedupe(t *testing.T) {
 	// Watch port + duplicate discovery entry for the same ip:port → one route.
 	g2 := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 8080))
 	extras[100] = []ServicePort{{Name: "AdGuard Home", Port: 8080, Scheme: "http", Source: "docker"}}
-	res2 := Transform([]proxmenux.Guest{g2}, extras, nil, nil, cfg)
+	res2 := Transform([]proxmenux.Guest{g2}, extras, nil, nil, nil, cfg)
 	if len(res2.Routes) != 1 {
 		t.Fatalf("ip:port dedupe failed: %+v", res2.Routes)
 	}
@@ -201,7 +201,7 @@ func TestAllowDenyAndReserved(t *testing.T) {
 	cfg.Expose.Deny = []string{"secret-app"}
 	g := guest(100, "a", "lxc", "10.0.0.1", "running",
 		watch("Secret App", 80), watch("Public App", 80))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Slug != "public-app" {
 		t.Fatalf("deny routes = %+v", res.Routes)
 	}
@@ -209,7 +209,7 @@ func TestAllowDenyAndReserved(t *testing.T) {
 	cfg2 := base()
 	cfg2.Routing.Probe = false
 	cfg2.Expose.Allow = []string{"public-app"}
-	res2 := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg2)
+	res2 := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg2)
 	if len(res2.Routes) != 1 || res2.Routes[0].Slug != "public-app" {
 		t.Fatalf("allow routes = %+v", res2.Routes)
 	}
@@ -219,7 +219,7 @@ func TestAllowDenyAndReserved(t *testing.T) {
 	cfg3.Dashboard.ViaTraefik = true
 	cfg3.Dashboard.Hostname = "provider"
 	g3 := guest(100, "a", "lxc", "10.0.0.1", "running", watch("Provider", 8081))
-	res3 := Transform([]proxmenux.Guest{g3}, nil, nil, nil, cfg3)
+	res3 := Transform([]proxmenux.Guest{g3}, nil, nil, nil, nil, cfg3)
 	if len(res3.Routes) != 0 || !strings.Contains(res3.Skipped[0].Reason, "reserved") {
 		t.Fatalf("reserved hostname: %+v %+v", res3.Routes, res3.Skipped)
 	}
@@ -230,7 +230,7 @@ func TestSlugOverrideAndHostnameSource(t *testing.T) {
 	cfg.Routing.Probe = false
 	cfg.Domain.SlugOverrides = map[string]string{"AdGuard Home": "dns"}
 	g := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 80))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if res.Routes[0].Slug != "dns" {
 		t.Errorf("override slug = %q, want dns", res.Routes[0].Slug)
 	}
@@ -239,7 +239,7 @@ func TestSlugOverrideAndHostnameSource(t *testing.T) {
 	cfg2.Routing.Probe = false
 	cfg2.Domain.SlugSource = "hostname"
 	g2 := guest(100, "adguard", "lxc", "10.0.0.100", "running", watch("AdGuard Home", 80))
-	res2 := Transform([]proxmenux.Guest{g2}, nil, nil, nil, cfg2)
+	res2 := Transform([]proxmenux.Guest{g2}, nil, nil, nil, nil, cfg2)
 	if res2.Routes[0].Slug != "adguard" {
 		t.Errorf("hostname-source slug = %q, want adguard", res2.Routes[0].Slug)
 	}
@@ -254,7 +254,7 @@ func TestPickIPPrefersLanSubnet(t *testing.T) {
 	// Arr-style guest: monitor reports the VPN IP first, LAN IP second.
 	g := guest(109, "qbittorrent", "lxc", "198.51.100.33", "running", watch("Qbittorrent", port))
 	g.IPs = []string{"127.0.0.1", "198.51.100.33"}
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 {
 		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
 	}
@@ -269,7 +269,7 @@ func TestPickIPFallsBackToUsable(t *testing.T) {
 	g := guest(115, "byparr", "lxc", "198.51.100.39", "running", watch("FlareSolverr", 8191))
 	g.IPs = []string{"198.51.100.39"}
 	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].IP != "198.51.100.39" {
 		t.Fatalf("fallback pick wrong: %+v", res.Routes)
 	}
@@ -279,7 +279,7 @@ func TestSidecarsAreReported(t *testing.T) {
 	cfg := base() // no source filter: sidecars are reported like ProxDnx
 	cfg.Routing.Probe = false
 	g := guest(111, "sonarr", "lxc", "10.0.0.150", "running", watch("Sonarr", 8989))
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || res.Routes[0].Slug != "sonarr" {
 		t.Fatalf("sidecar not reported: %+v (%+v)", res.Routes, res.Skipped)
 	}
@@ -325,21 +325,20 @@ func TestDomainPick(t *testing.T) {
 	g := guest(100, "adguard", "lxc", "10.0.0.2", "running", watch("AdGuard Home", 80))
 
 	// Default = Base domain.
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if res.Routes[0].Hostname != "adguard-home.home.example.com" {
 		t.Fatalf("default hostname = %q", res.Routes[0].Hostname)
 	}
 
 	// Per-vmid domain pick.
-	res2 := Transform([]proxmenux.Guest{g}, nil, nil, map[string]string{"100": "alt.example.com"}, cfg)
+	res2 := Transform([]proxmenux.Guest{g}, nil, nil, map[string]string{"100": "alt.example.com"}, nil, cfg)
 	if res2.Routes[0].Hostname != "adguard-home.alt.example.com" {
 		t.Fatalf("pick hostname = %q", res2.Routes[0].Hostname)
 	}
 
 	// Same slug on different domains coexists (collision is per-domain).
 	g2 := guest(200, "b", "lxc", "10.0.0.3", "running", watch("AdGuard Home", 80))
-	res3 := Transform([]proxmenux.Guest{g, g2}, nil, nil,
-		map[string]string{"100": "home.example.com", "200": "alt.example.com"}, cfg)
+	res3 := Transform([]proxmenux.Guest{g, g2}, nil, nil, map[string]string{"100": "home.example.com", "200": "alt.example.com"}, nil, cfg)
 	if len(res3.Routes) != 2 {
 		t.Fatalf("cross-domain same slug must coexist: %+v", res3.Routes)
 	}
@@ -352,20 +351,20 @@ func TestDefaultEnabledConfig(t *testing.T) {
 
 	// default_enabled=false: absent toggle = disabled (opt-in mode).
 	cfg.Routing.DefaultEnabled = false
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	if len(res.Routes) != 1 || !res.Routes[0].Disabled || res.Routes[0].Served {
 		t.Fatalf("opt-in default must show disabled: %+v", res.Routes)
 	}
 
 	// Explicit enable (false = on) overrides the default.
-	res2 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": false}, nil, cfg)
+	res2 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": false}, nil, nil, cfg)
 	if len(res2.Routes) != 1 || res2.Routes[0].Disabled || !res2.Routes[0].Served {
 		t.Fatalf("explicit enable must serve: %+v", res2.Routes)
 	}
 
 	// Explicit disable wins under default_enabled=true too.
 	cfg.Routing.DefaultEnabled = true
-	res3 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": true}, nil, cfg)
+	res3 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": true}, nil, nil, cfg)
 	if len(res3.Routes) != 1 || !res3.Routes[0].Disabled {
 		t.Fatalf("explicit disable must hold: %+v", res3.Routes)
 	}
@@ -381,7 +380,7 @@ func TestInfraToggle(t *testing.T) {
 
 	// default_enabled=false: all infra disabled, keys present.
 	cfg.Routing.DefaultEnabled = false
-	ApplyToggle(infra, nil, cfg)
+	ApplyToggle(infra, nil, nil, false, cfg)
 	for _, r := range infra {
 		if !r.Disabled || r.Served || r.Key == "" {
 			t.Fatalf("%s: key=%q disabled=%v served=%v", r.Slug, r.Key, r.Disabled, r.Served)
@@ -389,7 +388,7 @@ func TestInfraToggle(t *testing.T) {
 	}
 
 	// Explicit enable overrides the default.
-	ApplyToggle(infra, map[string]bool{"infra:menux": false}, cfg)
+	ApplyToggle(infra, map[string]bool{"infra:menux": false}, nil, false, cfg)
 	for _, r := range infra {
 		wantOn := r.Slug == "menux"
 		if r.Disabled == wantOn {
@@ -399,7 +398,7 @@ func TestInfraToggle(t *testing.T) {
 
 	// default_enabled=true + explicit disable.
 	cfg.Routing.DefaultEnabled = true
-	ApplyToggle(infra, map[string]bool{"infra:proxmenux": true}, cfg)
+	ApplyToggle(infra, map[string]bool{"infra:proxmenux": true}, nil, false, cfg)
 	for _, r := range infra {
 		wantOff := r.Slug == "proxmenux"
 		if r.Disabled != wantOff {
@@ -420,7 +419,7 @@ func TestSchemeAndPathHygiene(t *testing.T) {
 		{Name: "C", Ports: []proxmenux.Port{{Port: 82, Scheme: "", WebPath: "/ok path"}}},
 		{Name: "D", Ports: []proxmenux.Port{{Port: 83, Scheme: "HTTPS", WebPath: "/ok"}}},
 	}
-	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
 	got := map[string]Route{}
 	for _, r := range res.Routes {
 		got[r.AppName] = r

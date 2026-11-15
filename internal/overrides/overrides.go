@@ -12,8 +12,10 @@ import (
 
 type File struct {
 	SlugOverrides map[string]string `json:"slug_overrides"`
-	Domains       map[string]string `json:"domains"`  // vmid -> URL domain (per-app pick)
-	Disabled      map[string]bool   `json:"disabled"` // vmid -> app toggle off
+	Domains       map[string]string `json:"domains"`     // vmid/infra-key -> URL domain (per-app pick)
+	Disabled      map[string]bool   `json:"disabled"`    // vmid/infra-key -> explicit state
+	DomainsOff    map[string]bool   `json:"domains_off"` // domain -> global off (multiplier)
+	InfraOff      bool              `json:"infra_off"`   // global infra switch
 }
 
 type Store struct {
@@ -36,7 +38,12 @@ func (s *Store) loadLocked() (File, error) {
 	b, err := os.ReadFile(s.path) // #nosec G304 -- admin-controlled config path
 	if err != nil {
 		if os.IsNotExist(err) {
-			return File{SlugOverrides: map[string]string{}, Disabled: map[string]bool{}}, nil
+			return File{
+				SlugOverrides: map[string]string{},
+				Domains:       map[string]string{},
+				DomainsOff:    map[string]bool{},
+				Disabled:      map[string]bool{},
+			}, nil
 		}
 		return f, err
 	}
@@ -48,6 +55,9 @@ func (s *Store) loadLocked() (File, error) {
 	}
 	if f.Domains == nil {
 		f.Domains = map[string]string{}
+	}
+	if f.DomainsOff == nil {
+		f.DomainsOff = map[string]bool{}
 	}
 	if f.Disabled == nil {
 		f.Disabled = map[string]bool{}
@@ -80,6 +90,35 @@ func (s *Store) ClearDomain(vmid string) (bool, error) {
 	}
 	delete(f.Domains, vmid)
 	return true, s.saveLocked(f)
+}
+
+// SetDomainOff stores the global on/off switch for a whole domain
+// (multiplier over per-app state). off=false removes the entry.
+func (s *Store) SetDomainOff(domain string, off bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	if off {
+		f.DomainsOff[domain] = true
+	} else {
+		delete(f.DomainsOff, domain)
+	}
+	return s.saveLocked(f)
+}
+
+// SetInfraOff stores the global infrastructure switch.
+func (s *Store) SetInfraOff(off bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	f.InfraOff = off
+	return s.saveLocked(f)
 }
 
 // SetDisabled stores the explicit per-app toggle state (true = off,

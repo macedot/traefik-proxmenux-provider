@@ -193,6 +193,86 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		signalResync(o)
 		writeJSON(http.StatusOK, map[string]any{"ok": true, "key": key, "disabled": req.Disabled})
 	})
+	mux.HandleFunc("/api/domain", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON := func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+			return
+		}
+		if !o.Edit || o.Store == nil {
+			writeJSON(http.StatusForbidden, map[string]string{"error": "editing is disabled (dashboard.edit: false)"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "read body"})
+			return
+		}
+		var req struct {
+			Domain   string `json:"domain"`
+			Disabled bool   `json:"disabled"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		okDomain := false
+		for _, d := range o.Domains {
+			if d == req.Domain {
+				okDomain = true
+				break
+			}
+		}
+		if req.Domain == "" || !okDomain {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "domain not in the configured list"})
+			return
+		}
+		if err := o.Store.SetDomainOff(req.Domain, req.Disabled); err != nil {
+			writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		signalResync(o)
+		writeJSON(http.StatusOK, map[string]any{"ok": true, "domain": req.Domain, "disabled": req.Disabled})
+	})
+	mux.HandleFunc("/api/infra", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON := func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+			return
+		}
+		if !o.Edit || o.Store == nil {
+			writeJSON(http.StatusForbidden, map[string]string{"error": "editing is disabled (dashboard.edit: false)"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "read body"})
+			return
+		}
+		var req struct {
+			Disabled bool `json:"disabled"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		if err := o.Store.SetInfraOff(req.Disabled); err != nil {
+			writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		signalResync(o)
+		writeJSON(http.StatusOK, map[string]any{"ok": true, "disabled": req.Disabled})
+	})
 	return mux
 }
 

@@ -73,6 +73,17 @@ identity; a rename does not change it).
 `{"vmid": 100}` — clears the slug override **and** the domain pick
 (back to defaults). Response: `{"ok": true, "vmid": 100, "cleared": true}`.
 
+## POST /api/domain
+
+`{"domain": "example.com", "disabled": true}` — global switch for a whole
+domain (multiplier over per-app state). Domain must be in the configured
+list. Persisted in `overrides.json` (`domains_off`).
+
+## POST /api/infra
+
+`{"disabled": true}` — global infrastructure switch
+(`overrides.json` `infra_off`).
+
 ## POST /api/enabled
 
 `{"vmid": 100, "disabled": true}` for apps, or

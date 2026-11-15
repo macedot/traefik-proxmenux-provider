@@ -21,6 +21,8 @@
   .dhead{margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
   .dhead{cursor:pointer;-webkit-user-select:none;user-select:none}
   .dhead .fold{display:inline-block;width:1.1em}
+  .dgrid.off{opacity:.45}
+  .ddot,.idot{margin-left:10px}
   .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:border-color .15s,transform .15s;-webkit-user-select:none;user-select:none}
   .card.editing{border-color:var(--accent);animation:editpulse 1.1s ease-in-out infinite}
   @keyframes editpulse{0%,100%{opacity:1}50%{opacity:.55}}
@@ -57,7 +59,7 @@
   <p><span class="n" id="n">…</span> published services<br/>updated <span id="updated">…</span> · <span id="authmode"></span></p>
 </header>
 <section id="static" class="dsec">
-  <h2 class="dhead" id="statichead"><span class="fold">▾</span> Infrastructure · <span id="ninfra">0</span></h2>
+  <h2 class="dhead" id="statichead"><span class="fold">▾</span> Infrastructure · <span id="ninfra">0</span><button class="ebtn tgl idot" title=""></button></h2>
   <div id="staticgrid" class="dgrid"></div>
 </section>
 <main id="grid"><div class="empty">loading…</div></main>
@@ -237,10 +239,28 @@ async function load(){
       const list=byDomain.get(d);
       const sec=document.createElement("section");sec.className="dsec";
       const h=document.createElement("h2");h.className="dhead";
-      h.innerHTML='<span class="fold"></span> '+esc(d)+" · "+list.length+(list.length===1?" app":" apps");
-      const dg=document.createElement("div");dg.className="dgrid";
+      const isOff=(s.domains_off||[]).includes(d);
+      h.innerHTML='<span class="fold"></span> '+esc(d)+" · "+list.length+(list.length===1?" app":" apps")
+        +(s.edit_enabled?'<button class="ebtn tgl ddot" title=""></button>':"");
+      const dg=document.createElement("div");dg.className="dgrid"+(isOff?" off":"");
       list.forEach(x=>{const el=makeCard(x);views.set("v"+x.vmid,el);dg.appendChild(el);});
       sec.append(h,dg);
+      const ddot=h.querySelector(".ddot");
+      if(ddot){
+        const setD=()=>{ddot.textContent=isOff?"🔴":"🟢";
+          ddot.title=isOff?"domain off — click to enable all its apps":"domain on — click to switch the whole domain off";};
+        setD();
+        ddot.onclick=async(ev)=>{
+          ev.stopPropagation(); // dot toggles, header click still folds
+          if(ddot.disabled)return;
+          ddot.disabled=true;ddot.textContent="🟠";ddot.title="applying…";
+          const rr=await fetch("/api/domain",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({domain:d,disabled:!isOff})});
+          if(!rr.ok){const j=await rr.json().catch(()=>({}));ddot.disabled=false;ddot.textContent=j.error||"error";return}
+          await waitSync(rs=>((rs.domains_off||[]).includes(d))===!isOff);
+          load();
+        };
+      }
       // foldable: click the header; per-domain state survives reloads
       const key="pmp-fold-"+d;let folded=false;
       try{folded=localStorage.getItem(key)==="1"}catch(e){}
@@ -305,8 +325,25 @@ async function load(){
     });
     document.getElementById("static").hidden=infra.length===0;
     document.getElementById("ninfra").textContent=infra.length;
+    document.getElementById("staticgrid").classList.toggle("off",!!s.infra_off);
     // infra section folds like the domain sections; state persists
     const sh=document.getElementById("statichead"), sg2=document.getElementById("staticgrid");
+    const idot=sh.querySelector(".idot");
+    if(idot){
+      const setI=()=>{idot.textContent=s.infra_off?"🔴":"🟢";
+        idot.title=s.infra_off?"infra off — click to enable":"infra on — click to switch all infra off";};
+      setI();
+      idot.onclick=async(ev)=>{
+        ev.stopPropagation();
+        if(idot.disabled)return;
+        idot.disabled=true;idot.textContent="🟠";idot.title="applying…";
+        const rr=await fetch("/api/infra",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({disabled:!s.infra_off})});
+        if(!rr.ok){const j=await rr.json().catch(()=>({}));idot.disabled=false;idot.textContent=j.error||"error";return}
+        await waitSync(rs=>!!rs.infra_off===!s.infra_off);
+        load();
+      };
+    }
     const fkey="pmp-fold-infra";let ffolded=false;
     try{ffolded=localStorage.getItem(fkey)==="1"}catch(e){}
     const fapply=()=>{sg2.style.display=ffolded?"none":"";

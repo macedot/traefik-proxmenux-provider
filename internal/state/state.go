@@ -20,7 +20,9 @@ type Snapshot struct {
 	SyncCount   uint64              `json:"sync_count"`
 	LastError   string              `json:"last_error,omitempty"`
 	EditEnabled bool                `json:"edit_enabled"`
-	Domains     []string            `json:"domains"` // pickable URL domains (Base first)
+	Domains     []string            `json:"domains"`     // pickable URL domains (Base first)
+	DomainsOff  []string            `json:"domains_off"` // domains globally switched off
+	InfraOff    bool                `json:"infra_off"`   // global infra switch
 	Routes      []transform.Route   `json:"routes"`
 	Skipped     []transform.Skipped `json:"skipped"`
 }

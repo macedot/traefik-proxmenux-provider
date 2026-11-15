@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -149,6 +150,8 @@ func main() {
 		// Dashboard edits (overrides file) win over config slug_overrides.
 		disabled := map[string]bool{}
 		routeDomains := map[string]string{}
+		domainOff := map[string]bool{}
+		var infraOff bool
 		if ov, oerr := store.Load(); oerr != nil {
 			logger.Warn("overrides load failed", "err", oerr)
 		} else {
@@ -168,8 +171,14 @@ func main() {
 			for k, v := range ov.Disabled {
 				disabled[k] = v // explicit state (true=off, false=on); absent = config default
 			}
+			for k, v := range ov.DomainsOff {
+				if v {
+					domainOff[k] = true
+				}
+			}
+			infraOff = ov.InfraOff
 		}
-		result := transform.Transform(guests, extras, disabled, routeDomains, cfg)
+		result := transform.Transform(guests, extras, disabled, routeDomains, domainOff, cfg)
 
 		// Static infra entries (ProxDnx parity): <host> (PVE UI) and the
 		// ProxMenux UI names, derived from the monitor hostname + api host.
@@ -185,7 +194,7 @@ func main() {
 					// Edits (rename/domain) then toggle, both keyed by the
 					// stable infra:<default-slug> identity.
 					transform.ApplyInfraEdits(infra, cfg.Domain.SlugOverrides, routeDomains)
-					transform.ApplyToggle(infra, disabled, cfg)
+					transform.ApplyToggle(infra, disabled, domainOff, infraOff, cfg)
 					result.Routes = append(infra, result.Routes...)
 				}
 			} else {
@@ -227,6 +236,8 @@ func main() {
 		snap.AuthMode = string(authMode)
 		snap.EditEnabled = cfg.Dashboard.Edit
 		snap.Domains = cfg.Domain.All()
+		snap.DomainsOff = domainOffKeys(domainOff)
+		snap.InfraOff = infraOff
 		snap.GeneratedAt = time.Now()
 		snap.NextSyncAt = time.Now().Add(cfg.Provider.PollInterval.Std())
 		snap.Routes = result.Routes
@@ -349,4 +360,16 @@ func newLogger(level string) *slog.Logger {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(1)
+}
+
+// domainOffKeys returns the sorted list of switched-off domains (stable for the UI).
+func domainOffKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		if v {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

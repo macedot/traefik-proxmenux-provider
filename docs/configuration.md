@@ -96,11 +96,14 @@ Next to the config, mode 0600, atomic:
 {
   "slug_overrides": {"100": "dns", "infra:menux": "proxmox"},
   "domains":        {"100": "example.org"},
-  "disabled":       {"100": true, "infra:menux": false}
+  "disabled":       {"100": true, "infra:menux": false},
+  "domains_off":    {"example.com": true},
+  "infra_off":      false
 }
 ```
 
 Keys are vmids (apps) or `infra:<default-slug>` (infra entries — the key is
 stable even after a rename; edits change the rendered slug/hostname only).
 Values in `disabled` are **explicit states** (`true` = off, `false` = on); a
-missing key falls back to `routing.default_enabled`.
+missing key falls back to `routing.default_enabled`. `domains_off` and
+`infra_off` are global multipliers applied on top of per-app state.
