@@ -1,0 +1,66 @@
+# traefik-proxmenux-provider configuration
+#
+# Install as /etc/traefik-proxmenux/config.yaml (owner root, chmod 0600).
+# REQUIRED inputs are only:  domain.base   (+ tls.email unless tls.mode=internal)
+# Everything else has safe defaults. This file must never contain secrets:
+# the API token lives in its own 0600 file referenced by proxmenux.token_file.
+
+provider:
+  poll_interval: 30s          # how often to re-sync routes (min 10s, enforced)
+  log_level: info             # debug | info | warn | error
+
+proxmenux:
+  api_url: http://192.0.2.10:8008   # ProxMenux monitor API on the PVE host
+  # token_file: /etc/traefik-proxmenux/token  # Bearer token, chmod 0600.
+  #   Strongly recommended: enable auth in ProxMenux and create a dedicated
+  #   token for this provider. Omit only while monitor auth is disabled
+  #   (LAN-open API) — the provider works either way.
+  timeout: 10s                # per-request timeout
+  max_response_bytes: 5242880 # response size cap (5 MiB)
+  source: oci                 # which guests may become routes:
+                              #   oci     = ProxMenux OCI-managed apps only (default)
+                              #   watches = also user-registered sidecar apps
+                              #   all     = every guest with any app watch
+
+domain:
+  base: home.example.com      # REQUIRED: every app becomes <slug>.base
+  slug_source: watch          # watch    = app name ("AdGuard Home" -> adguard-home)
+                              # hostname = LXC/VM hostname
+  # slug_overrides:           # optional manual slug fixes, keyed by vmid or name
+  #   "AdGuard Home": dns
+  # include_vmid_suffix: false  # true -> adguard-home-100 (collision-proof slugs)
+
+tls:
+  mode: internal              # internal | per-app | wildcard
+                              # internal: Traefik default (self-signed) CA —
+                              #           LAN-only, zero external dependencies
+                              # per-app:  ACME (TLS-ALPN) per hostname — needs
+                              #           public TCP 443 straight to Traefik
+                              # wildcard: DNS-01 *.base — best for CF-proxied
+                              #           zones; requires dns_provider
+  # email: you@example.com    # REQUIRED unless mode=internal (ACME account)
+  # dns_provider: cloudflare  # wildcard mode only (lego provider name)
+  # dns_credentials_file: /etc/traefik-proxmenux/dns.env  # 0600, provider creds
+
+routing:
+  entrypoint: websecure       # entryPoint receiving generated routers
+  # middlewares: []           # extra middlewares on every router,
+                              # e.g. [secure-headers@file]
+  probe: true                 # TCP-check ip:port before publishing a route —
+                              # skips dead or drifted apps instead of exposing
+                              # them
+  probe_timeout: 2s
+  health_check: false         # add Traefik health checks from web_path/health_path
+
+expose:
+  # allow: []                 # slugs to expose; empty = all discovered apps
+  # deny: []                  # slugs never exposed (wins over allow)
+  dashboard:
+    enabled: false            # publish traefik.<base> with CIDR allowlist —
+                              # the secure replacement for api.insecure
+    # allow_cidrs: ["10.0.0.0/8"]
+
+output:
+  file: /etc/traefik/conf.d/proxmenux-generated.yaml
+  mode: 0o644
+  backup: true                # keep a .bak of the output before each change
