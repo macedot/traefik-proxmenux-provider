@@ -30,6 +30,8 @@
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
   .chip{background:#262a30;border:1px solid var(--border);border-radius:6px;padding:2px 8px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
   .chip b{color:var(--text);font-weight:600}
+  a.chip{color:var(--muted);text-decoration:none}
+  a.chip:hover{border-color:var(--accent);color:var(--text)}
   .chip.bad{color:#ff6b6b;border-color:#7a3a3a;background:#2a1a1a}
   .chip.warn{color:#ffb86b;border-color:#7a5c2a;background:#2a2318}
   .ebtn.tgl{margin-left:auto;color:var(--text)}
@@ -142,7 +144,8 @@ async function load(){
       c.appendChild(svc);
       if(flags){const fl=document.createElement("div");fl.className="chips";fl.innerHTML=flags;c.appendChild(fl)}
       const ch=document.createElement("div");ch.className="chips";
-      ch.innerHTML='<span class="chip">🖥 <b>'+esc(x.guest_name)+'</b></span><span class="chip"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</span>';
+      ch.innerHTML='<span class="chip">🖥 <b>'+esc(x.guest_name)+'</b></span>'
+        +'<a class="chip iplink" href="'+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+' directly"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</a>';
       if(s.edit_enabled){
         const t=document.createElement("button");t.className="ebtn tgl";
         t.textContent=x.disabled?"▶ enable":"⏸ disable";
@@ -189,7 +192,7 @@ async function load(){
       const chip=r.disabled?'<span class="chip warn">⏸ disabled</span>':"";
       c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="'+proto()+'//'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
         +'<div class="svc">'+esc(r.app_name)+'</div>'
-        +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><span class="chip"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</span>'+chip
+        +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><a class="chip iplink" href="'+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+' directly"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</a>'+chip
         +(s.edit_enabled?'<button class="ebtn tgl" title="'+(r.disabled?"publish this route":"stop serving this route (card stays visible)")+'">'+(r.disabled?"▶ enable":"⏸ disable")+"</button>":"")
         +'</div>';
       const b=c.querySelector(".ebtn.tgl");
