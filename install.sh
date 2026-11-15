@@ -112,7 +112,14 @@ fi
 # --- dashboard (default: ON) -------------------------------------------------
 if $NO_DASHBOARD; then DASH_ENABLED=false; else DASH_ENABLED=true; fi
 if $DASH_ENABLED; then
-  log "dashboard: enabled on :8081 (http://<this-ct>:$DASH_HOSTNAME path configurable)"
+  log "dashboard: enabled on :8082 (http://<this-ct>:8082; also routed via Traefik)"
+fi
+
+# --- crowdsec detection: chain crowdsec@file on generated routers ------------
+ROUTING_BLOCK=""
+if [[ -f /etc/traefik/conf.d/zz-crowdsec.yml ]]; then
+  log "crowdsec detected — generated routers will chain crowdsec@file"
+  ROUTING_BLOCK=$'routing:\n  middlewares:\n    - crowdsec@file'
 fi
 
 # --- optional API token ------------------------------------------------------
@@ -145,9 +152,9 @@ proxmenux:
 $TOKEN_REF
 domain:
   base: $DOMAIN
-${tls_block}dashboard:
+${tls_block}${ROUTING_BLOCK}dashboard:
   enabled: $DASH_ENABLED
-  listen: ":8081"
+  listen: ":8082"
   via_traefik: true
   hostname: $DASH_HOSTNAME
 EOF
@@ -187,10 +194,10 @@ systemctl enable --now traefik-proxmenux-provider.service
 sleep 3
 systemctl is-active --quiet traefik-proxmenux-provider.service || {
   journalctl -u traefik-proxmenux-provider -n 20 --no-pager; die "service failed to start"; }
-curl -fsS http://127.0.0.1:8081/healthz >/dev/null || warn "dashboard not answering on :8081 yet"
+curl -fsS http://127.0.0.1:8082/healthz >/dev/null || warn "dashboard not answering on :8082 yet"
 [[ -f /etc/traefik/conf.d/proxmenux-generated.yaml ]] || warn "generated file not present yet"
 
 log "installed. routes so far:"
-curl -fsS http://127.0.0.1:8081/api/routes 2>/dev/null | head -40 || true
+curl -fsS http://127.0.0.1:8082/api/routes 2>/dev/null | head -40 || true
 log "next: make *.${DOMAIN} resolve to this CT (local DNS override, or wildcard DNS-01 later)"
-log "dashboard: http://$(hostname -I | awk '{print $1}'):8081  (also ${DASH_HOSTNAME}.${DOMAIN} via Traefik)"
+log "dashboard: http://$(hostname -I | awk '{print $1}'):8082  (also ${DASH_HOSTNAME}.${DOMAIN} via Traefik)"

@@ -19,8 +19,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Dashboard.Enabled != true {
 		t.Error("dashboard must default to enabled")
 	}
-	if cfg.Dashboard.Listen != ":8081" {
-		t.Errorf("dashboard.listen default = %q, want :8081", cfg.Dashboard.Listen)
+	if cfg.Dashboard.Listen != ":8082" {
+		t.Errorf("dashboard.listen default = %q, want :8082", cfg.Dashboard.Listen)
 	}
 	if cfg.TLS.Mode != "internal" {
 		t.Errorf("tls.mode default = %q, want internal", cfg.TLS.Mode)

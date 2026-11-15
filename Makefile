@@ -4,7 +4,7 @@ BIN ?= traefik-proxmenux-provider
 .PHONY: build test vet fmt tidy clean
 
 build:
-	go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/provider
+	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/provider
 
 test:
 	go test -race ./...

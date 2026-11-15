@@ -130,7 +130,7 @@ skipped counts, source filter, poll interval. Same data as JSON at
 | Access path | URL | Security |
 |---|---|---|
 | Traefik-routed (recommended) | `https://provider.<domain>` (`via_traefik: true`) | same generated TLS + CIDR allowlist |
-| Direct | `http://<traefik-ct>:8081` (`listen`) | LAN bind only |
+| Direct | `http://<traefik-ct>:8082` (`listen`) | LAN bind only |
 
 Read-only by construction: no mutation endpoints, no secrets rendered. Ships
 in M1 alongside the core — the UI is just the sync state the provider keeps

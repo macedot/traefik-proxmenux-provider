@@ -115,7 +115,7 @@ func Defaults() *Config {
 		Domain:    Domain{SlugSource: "watch"},
 		TLS:       TLS{Mode: "internal", CertResolver: "letsencrypt"},
 		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(2 * time.Second)},
-		Dashboard: Dashboard{Enabled: true, Listen: ":8081", Hostname: "provider"},
+		Dashboard: Dashboard{Enabled: true, Listen: ":8082", Hostname: "provider"},
 		Output:    Output{File: "/etc/traefik/conf.d/proxmenux-generated.yaml", Mode: "0644", Backup: true},
 	}
 }
