@@ -205,7 +205,15 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 			seenIPPort[gip+":"+strconv.Itoa(sp.Port)] = true
 
 			// Per-app on/off toggle: card stays visible, route not served.
-			if disabled[strconv.Itoa(g.VMID)] {
+			// Explicit per-app state wins; absent key = config default
+			// (routing.default_enabled). Map values: true = off, false = on.
+			var isDisabled bool
+			if v, explicit := disabled[strconv.Itoa(g.VMID)]; explicit {
+				isDisabled = v
+			} else {
+				isDisabled = !cfg.Routing.DefaultEnabled
+			}
+			if isDisabled {
 				route.Disabled = true
 				route.Served = false
 				res.Routes = append(res.Routes, route)

@@ -215,12 +215,13 @@ func TestEnabledEndpoint(t *testing.T) {
 		t.Error("resync not signalled")
 	}
 
-	// Re-enable removes the key.
+	// Re-enable stores an explicit ON (false); absent keys fall back to
+	// the config default (routing.default_enabled).
 	resp2, _ := cli.Post(srv.URL+"/api/enabled", "application/json",
 		strings.NewReader(`{"vmid":100,"disabled":false}`))
 	resp2.Body.Close()
 	f2, _ := store.Load()
-	if len(f2.Disabled) != 0 {
-		t.Fatalf("disabled not cleared: %+v", f2.Disabled)
+	if f2.Disabled["100"] {
+		t.Fatalf("expected explicit enabled (false), got: %+v", f2.Disabled)
 	}
 }

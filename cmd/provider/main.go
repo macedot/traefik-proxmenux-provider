@@ -166,9 +166,7 @@ func main() {
 				}
 			}
 			for k, v := range ov.Disabled {
-				if v {
-					disabled[k] = true
-				}
+				disabled[k] = v // explicit state (true=off, false=on); absent = config default
 			}
 		}
 		result := transform.Transform(guests, extras, disabled, routeDomains, cfg)

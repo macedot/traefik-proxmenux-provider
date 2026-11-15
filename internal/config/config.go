@@ -100,11 +100,12 @@ type TLS struct {
 }
 
 type Routing struct {
-	Entrypoint   string   `yaml:"entrypoint"`
-	Middlewares  []string `yaml:"middlewares"`
-	Probe        bool     `yaml:"probe"`
-	ProbeTimeout Duration `yaml:"probe_timeout"`
-	HealthCheck  bool     `yaml:"health_check"`
+	Entrypoint     string   `yaml:"entrypoint"`
+	Middlewares    []string `yaml:"middlewares"`
+	Probe          bool     `yaml:"probe"`
+	ProbeTimeout   Duration `yaml:"probe_timeout"`
+	HealthCheck    bool     `yaml:"health_check"`
+	DefaultEnabled bool     `yaml:"default_enabled"` // apps served unless toggled off; false = opt-in (start all apps off)
 }
 
 type TraefikDashboard struct {
@@ -158,7 +159,7 @@ func Defaults() *Config {
 		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024},
 		Domain:    Domain{SlugSource: "watch"},
 		TLS:       TLS{Mode: "internal", CertResolver: "letsencrypt"},
-		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(1200 * time.Millisecond)},
+		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(1200 * time.Millisecond), DefaultEnabled: true},
 		Infra:     Infra{Enabled: true},
 		Dashboard: Dashboard{Enabled: true, Listen: ":8082", Hostname: "provider", Edit: true},
 		Output:    Output{File: "/etc/traefik/conf.d/proxmenux-generated.yaml", Mode: "0644", Backup: true},

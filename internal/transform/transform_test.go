@@ -340,3 +340,29 @@ func TestDomainPick(t *testing.T) {
 		t.Fatalf("cross-domain same slug must coexist: %+v", res3.Routes)
 	}
 }
+
+func TestDefaultEnabledConfig(t *testing.T) {
+	cfg := base()
+	cfg.Routing.Probe = false
+	g := guest(100, "adguard", "lxc", "10.0.0.2", "running", watch("AdGuard Home", 80))
+
+	// default_enabled=false: absent toggle = disabled (opt-in mode).
+	cfg.Routing.DefaultEnabled = false
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, cfg)
+	if len(res.Routes) != 1 || !res.Routes[0].Disabled || res.Routes[0].Served {
+		t.Fatalf("opt-in default must show disabled: %+v", res.Routes)
+	}
+
+	// Explicit enable (false = on) overrides the default.
+	res2 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": false}, nil, cfg)
+	if len(res2.Routes) != 1 || res2.Routes[0].Disabled || !res2.Routes[0].Served {
+		t.Fatalf("explicit enable must serve: %+v", res2.Routes)
+	}
+
+	// Explicit disable wins under default_enabled=true too.
+	cfg.Routing.DefaultEnabled = true
+	res3 := Transform([]proxmenux.Guest{g}, nil, map[string]bool{"100": true}, nil, cfg)
+	if len(res3.Routes) != 1 || !res3.Routes[0].Disabled {
+		t.Fatalf("explicit disable must hold: %+v", res3.Routes)
+	}
+}

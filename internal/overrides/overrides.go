@@ -82,7 +82,8 @@ func (s *Store) ClearDomain(vmid string) (bool, error) {
 	return true, s.saveLocked(f)
 }
 
-// SetDisabled toggles an app on/off by vmid. disabled=false removes the key.
+// SetDisabled stores the explicit per-app toggle state (true = off,
+// false = on). Absent key = config default (routing.default_enabled).
 func (s *Store) SetDisabled(vmid string, disabled bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,11 +91,7 @@ func (s *Store) SetDisabled(vmid string, disabled bool) error {
 	if err != nil {
 		return err
 	}
-	if disabled {
-		f.Disabled[vmid] = true
-	} else {
-		delete(f.Disabled, vmid)
-	}
+	f.Disabled[vmid] = disabled
 	return s.saveLocked(f)
 }
 
