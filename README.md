@@ -14,10 +14,9 @@ the raw Proxmox VE API — **no PVE API token, no cluster privileges, no
 per-guest label editing.** Your only inputs: a domain (+ ACME email for
 public TLS).
 
-> **Status: implemented** — M1 (core + dashboard) and M2 (packaging) done;
-> running live on the pve-host homelab (the-traefik-host). Working copy:
-> `/root/traefik-proxmenux-provider` on pve-host (dev + build, Go 1.24.4 on
-> the host); no local checkout kept.
+> **Status: implemented** — M1 (core + dashboard), M2 (packaging) and most of
+> M3 done; running live in a homelab behind Traefik. Go 1.24+, stdlib-only;
+> no local checkout required to deploy — build a static binary and copy it in.
 
 ## Install (inside the Traefik CT)
 
@@ -60,8 +59,8 @@ The original is a yaegi plugin (`experimental.plugins`). This project is a
 | Traefik changes | static config + restart | none (file provider already watches `conf.d`) |
 
 Provider semantics are preserved — poll → dynamic config; only the transport
-changes (file vs in-process channel). Same pattern already proven on this
-host by ProxDnx.
+changes (file vs in-process channel). The same companion-generator pattern is
+proven in ProxDnx.
 
 ## What changed vs the original
 
@@ -96,8 +95,9 @@ host by ProxDnx.
    deps) · `per-app` (ACME TLS-ALPN per hostname, needs public 443 straight
    to Traefik) · `wildcard` (DNS-01 `*.<domain>`, creds in separate 0600 env
    file).
-7. **Dashboard** — default off; optional `traefik.<domain>` router with CIDR
-   allowlist, the secure replacement for `api.insecure`.
+7. **Dashboard exposure** — the provider UI listens on a LAN bind by default;
+   the optional Traefik-routed path (`expose.dashboard`, CIDR allowlist) is
+   the secure replacement for `api.insecure`.
 8. **Generated-file safety** — `# GENERATED` header, one fixed output path,
    atomic swap (tmp + fsync + rename), previous copy kept as `.bak`, no other
    file under `conf.d` ever touched.
@@ -105,11 +105,13 @@ host by ProxDnx.
    `go vet` + tests in CI, goreleaser static binaries.
 10. **Tests are a first-class deliverable** — table-driven unit tests with
     fixtures captured from real API shapes; `--dry-run` integration mode.
-11. **Provider dashboard is read-only by construction** — serves only the
-    last sync state: no mutation endpoints, no secrets rendered, no config
-    writes. Direct access is a plain LAN bind; the recommended path routes it
-    through Traefik (`dashboard.via_traefik`) with a CIDR allowlist, so it is
-    never reachable from an unprotected entrypoint.
+11. **Provider dashboard is minimal and gated** — serves sync state plus two
+    validated mutation endpoints (rename/domain pick, per-app toggle) that
+    require `dashboard.edit: true` and persist only to `overrides.json`;
+    no secrets rendered, no config writes, no shell-outs. Direct access is a
+    plain LAN bind; the recommended path routes it through Traefik
+    (`dashboard.via_traefik`) with a CIDR allowlist, so it is never reachable
+    from an unprotected entrypoint.
 
 ## Configuration
 
@@ -125,25 +127,32 @@ Key choices (**bold** = default):
 | `proxmenux.source` | **oci** · watches · all |
 | `tls.mode` | **internal** · per-app · wildcard |
 | `domain.slug_source` | **watch** ("AdGuard Home" → `adguard-home`) · hostname |
+| `domain.alternates` | extra domains pickable per app in the dashboard |
 | `routing.probe` | **true** |
+| `routing.default_enabled` | **true** · false (opt-in: apps start disabled) |
 | `expose.dashboard.enabled` | **false** |
-| `dashboard.enabled` | **true** (read-only provider UI) |
+| `dashboard.enabled` | **true** (provider status UI) |
 
-## Dashboard (ProxDnx-style)
+## Dashboard
 
-The provider embeds a **read-only status UI** showing every URL it generated,
-per container — it already holds all of that after each sync.
+The provider embeds a status UI listing every app and infrastructure URL it
+manages, grouped per domain (config order, foldable sections).
 
-Per container: app name + vmid, `https://<slug>.<domain>` link, target
-`ip:port`, TLS mode, probe result — and when a route is skipped, the reason
-(probe failed, denied, stopped, collision).
+Per app: name + vmid, the published `https://<slug>.<domain>` link, a
+clickable target `ip:port`, a stale probe flag — plus per-app controls:
 
-**Editing:** double-click a published URL (or focus the row and hit Enter/F2)
-to rename it — `<slug>.<domain>` updates in seconds and persists to
-`overrides.json` next to the config; "Default" resets to the automatic slug.
-Disabled with `dashboard.edit: false`. Header: last/next sync, exposed /
-skipped counts, source filter, poll interval. Same data as JSON at
-`GET /api/routes` for scripts or other tools.
+- **on/off toggle** — disabled apps stay visible (grayed) but are removed
+  from the generated config; `routing.default_enabled` decides what an
+  untouched app does (`false` = opt-in: everything starts grayed until you
+  enable it one by one)
+- **rename + domain picker** — double-click a card (or Enter/F2) to rename
+  the slug and pick any configured domain; persists to `overrides.json`,
+  "Default" resets both. While an edit is in flight the card pulses until
+  the new URL is actually published
+- infrastructure entries (PVE UI, ProxMenux UI) get the same toggle
+
+Header: last sync (ISO timestamp), exposed/skipped counts, auth mode.
+Same data as JSON at `GET /api/routes` for scripts or other tools.
 
 | Access path | URL | Security |
 |---|---|---|
@@ -161,33 +170,32 @@ anyway.
 | M0 | Scaffold: PLAN.md, config.example.yaml, README, MIT (derived-from) | ✅ done |
 | M1 | Core Go: config, monitor client, transform, generate, dry-run, embedded read-only dashboard | ✅ done |
 | M2 | Packaging: hardened systemd unit, `install.sh` / `uninstall.sh` | ✅ done |
-| M3 | Live on pve-host the-traefik-host + hardening: monitor auth + token, `api.insecure` fix | ✅ live (12 routes) · hardening pending |
-| M4 | CI, docs, goreleaser `v0.1.0` | planned |
+| M3 | Hardening: monitor auth + token, dashboard via Traefik (CIDR allowlist) instead of `api.insecure` | auth flow shipped · hardening steps pending |
+| M4 | CI, docs, goreleaser `v0.1.0` | CI live · release pending |
 | M5 | (optional, later) ProxMenux OCI catalog entry: one-click traefik+provider stack | planned |
 
-## Decisions (2026-11-15)
+## Decisions
 
-1. **TLS for the pve-host test = `internal` first.** Public exposure later via
-   `wildcard` (DNS-01) — the public edge is NPM+ behind Cloudflare, so
-   per-app TLS-ALPN can't pass through it.
-2. **Enable monitor API auth + create a dedicated token in M3.** (Currently
-   configured-but-disabled; the API is open on `0.0.0.0:8008`.)
-3. **Fix `api.insecure: true` on the-traefik-host in M3**, replaced by the
-   CIDR-allowlisted dashboard router.
+1. **TLS `internal` first** — safe LAN default with zero external deps;
+   public exposure later via `wildcard` (DNS-01) or a non-proxied DNS record.
+2. **Monitor auth + dedicated token** — supported from day one with
+   if-and-only-if semantics; the M3 checklist walks through enabling it.
+3. **No insecure Traefik dashboard** — use the provider's own dashboard,
+   routed through Traefik with a CIDR allowlist instead of `api.insecure`.
 
-## Testing on pve-host (the-traefik-host = traefik, 192.0.2.50, vmbr0)
+## Testing on a live instance
 
-- **Phase 1 — dry run (no side effects):** build on pve-host (`go build`, Go
-  1.24.4 on the host), `pct push` the binary into the-traefik-host, `--once --dry-run`,
-  review slugs/targets against live app_watches.
+- **Phase 1 — dry run (no side effects):** build (`make build` or
+  `go build`), copy the binary into the Traefik host/CT, run
+  `--once --dry-run`, review slugs/targets against the live app_watches.
 - **Phase 2 — live (`tls.mode: internal`):** install the unit, verify the
-  generated file, Traefik dashboard routers, provider dashboard lists every
-  route with probe status, `curl --resolve` checks; route count == dry-run
-  count.
+  generated file, Traefik routers, provider dashboard lists every route with
+  probe status, `curl --resolve` checks; route count == dry-run count.
 - **Phase 3 — hardening:** enable monitor auth + token (re-test with
-  `token_file`), disable `api.insecure`, publish the dashboard router.
-- **Rollback:** disable unit + `rm conf.d/proxmenux-generated.yaml` → conf.d
-  back to its original empty state.
+  `token_file`), disable any insecure dashboard, publish the dashboard
+  router with a CIDR allowlist.
+- **Rollback:** stop the unit and remove
+  `conf.d/proxmenux-generated.yaml` → `conf.d` back to its original state.
 
 Full engineering detail (threat analysis, risks, pitfalls): [PLAN.md](PLAN.md).
 

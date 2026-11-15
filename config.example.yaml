@@ -78,7 +78,7 @@ dashboard:
   edit: true                  # double-click a URL to rename it (persists to
                               # overrides.json next to the config)
   # hostname: provider        # subdomain when via_traefik: true
-  # allow_cidrs: ["192.0.2.0/25"]
+  # allow_cidrs: ["192.0.2.0/24"]
 
 infra:
   enabled: true               # static entries on the provider domain
