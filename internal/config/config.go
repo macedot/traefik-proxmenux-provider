@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,6 +46,9 @@ type ProxMenux struct {
 	Timeout          Duration `yaml:"timeout"`
 	MaxResponseBytes int      `yaml:"max_response_bytes"`
 	Source           string   `yaml:"source"`
+	LANCIDR          string   `yaml:"lan_cidr"` // prefer guest IPs in this subnet (default: provider's /24)
+	LANResolved      string   `yaml:"-"`        // runtime-resolved CIDR used by transform
+	OverridesPath    string   `yaml:"-"`        // runtime: <config dir>/overrides.json
 }
 
 type Domain struct {
@@ -88,6 +92,7 @@ type Dashboard struct {
 	ViaTraefik bool     `yaml:"via_traefik"`
 	Hostname   string   `yaml:"hostname"`
 	AllowCIDRs []string `yaml:"allow_cidrs"`
+	Edit       bool     `yaml:"edit"` // double-click slug edits on the dashboard
 }
 
 type Output struct {
@@ -111,11 +116,11 @@ type Config struct {
 func Defaults() *Config {
 	return &Config{
 		Provider:  Provider{PollInterval: Duration(30 * time.Second), LogLevel: "info"},
-		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024, Source: "oci"},
+		ProxMenux: ProxMenux{Timeout: Duration(10 * time.Second), MaxResponseBytes: 5 * 1024 * 1024, Source: "watches"},
 		Domain:    Domain{SlugSource: "watch"},
 		TLS:       TLS{Mode: "internal", CertResolver: "letsencrypt"},
 		Routing:   Routing{Entrypoint: "websecure", Probe: true, ProbeTimeout: Duration(2 * time.Second)},
-		Dashboard: Dashboard{Enabled: true, Listen: ":8082", Hostname: "provider"},
+		Dashboard: Dashboard{Enabled: true, Listen: ":8082", Hostname: "provider", Edit: true},
 		Output:    Output{File: "/etc/traefik/conf.d/proxmenux-generated.yaml", Mode: "0644", Backup: true},
 	}
 }
@@ -125,7 +130,12 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	return Parse(b)
+	cfg, err := Parse(b)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ProxMenux.OverridesPath = filepath.Join(filepath.Dir(path), "overrides.json")
+	return cfg, nil
 }
 
 func Parse(b []byte) (*Config, error) {
@@ -179,6 +189,11 @@ func (c *Config) Validate() error {
 	case "oci", "watches", "all":
 	default:
 		add("proxmenux.source must be oci|watches|all (got %q)", c.ProxMenux.Source)
+	}
+	if c.ProxMenux.LANCIDR != "" {
+		if _, _, err := net.ParseCIDR(strings.TrimSpace(c.ProxMenux.LANCIDR)); err != nil {
+			add("proxmenux.lan_cidr: invalid CIDR %q", c.ProxMenux.LANCIDR)
+		}
 	}
 
 	// domain

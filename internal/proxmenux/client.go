@@ -42,13 +42,14 @@ const (
 
 // Guest is one entry of GET /api/vms.
 type Guest struct {
-	VMID       int     `json:"vmid"`
-	Name       string  `json:"name"`
-	IP         string  `json:"ip"`
-	Type       string  `json:"type"`
-	Status     string  `json:"status"`
-	Tags       string  `json:"tags"`
-	AppWatches []Watch `json:"app_watches"`
+	VMID       int      `json:"vmid"`
+	Name       string   `json:"name"`
+	IP         string   `json:"ip"`
+	IPs        []string `json:"ips"` // all guest IPs (VPN + LAN) — pick by subnet
+	Type       string   `json:"type"`
+	Status     string   `json:"status"`
+	Tags       string   `json:"tags"`
+	AppWatches []Watch  `json:"app_watches"`
 }
 
 // Watch is a monitored app on a guest. OCI-managed apps are synthetic

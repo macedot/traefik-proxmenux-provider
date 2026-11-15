@@ -30,6 +30,12 @@
   footer { color:var(--mut); font-size:12px; margin-top:16px; }
   td.name b { display:block; }
   td.name span { color:var(--mut); font-size:12px; }
+  tr[tabindex] { cursor:default; }
+  tr[tabindex]:hover td { background:#1b2029; }
+  .editinp { background:#0f1115; color:var(--fg); border:1px solid var(--acc); border-radius:6px; padding:4px 8px; font:13px ui-monospace,SFMono-Regular,Menlo,monospace; width:180px; }
+  .editrow button { background:#1d222c; color:var(--fg); border:1px solid var(--bd); border-radius:6px; padding:4px 10px; margin-left:6px; font-size:12px; cursor:pointer; }
+  .editrow button:hover { border-color:var(--acc); }
+  tr.editing td { background:#1b2029; }
 </style>
 </head>
 <body>
@@ -56,8 +62,9 @@
   <tbody id="rows"></tbody>
 </table>
 <div class="empty" id="empty">Waiting for first sync…</div>
-<footer>Read-only view · <span class="mono">GET /api/routes</span> for JSON · routes are managed in <span class="mono">conf.d/proxmenux-generated.yaml</span></footer>
+<footer>Double-click a URL to rename it · <span class="mono">GET /api/routes</span> for JSON · routes live in <span class="mono">conf.d/proxmenux-generated.yaml</span></footer>
 <script>
+let EDITING = false;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString() : "—";
 async function refresh() {
@@ -79,8 +86,10 @@ async function refresh() {
 
     const rows = [];
     for (const r of s.routes || []) {
-      rows.push(`<tr><td class="name"><b>${esc(r.app_name)}</b><span>vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
-        `<td><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener">https://${esc(r.hostname)}</a></td>` +
+      const edit = s.edit_enabled;
+      rows.push(`<tr data-vmid="${r.vmid}" tabindex="0" title="${edit ? "double-click (or Enter/F2) to edit the URL" : ""}">` +
+        `<td class="name"><b>${esc(r.app_name)}</b><span>vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
+        `<td class="urlcell"><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener">https://${esc(r.hostname)}</a></td>` +
         `<td class="mono">${esc(r.target)}</td>` +
         `<td class="status-ok">✓ published</td></tr>`);
     }
@@ -91,11 +100,68 @@ async function refresh() {
     }
     const tbl = document.getElementById("tbl"), empty = document.getElementById("empty");
     tbl.hidden = rows.length === 0; empty.hidden = rows.length > 0;
-    document.getElementById("rows").innerHTML = rows.join("");
+    const tbody = document.getElementById("rows");
+    tbody.innerHTML = rows.join("");
+    if (s.edit_enabled) {
+      tbody.querySelectorAll("tr[data-vmid]").forEach(tr => {
+        const r = (s.routes || []).find(x => x.vmid === parseInt(tr.dataset.vmid, 10));
+        if (r) { wireEdit(tr, r); }
+      });
+    }
   } catch (e) { /* transient fetch error: keep last render */ }
 }
+
+// ProxDnx-style editing: double-click the row (or Enter/F2 on the focused
+// row) edits the URL slug; Save persists, Default resets, Cancel reverts.
+// click-count detection (ev.detail===2) is steadier than the dblclick event;
+// links and the edit row are exempt. EDITING pauses auto-refresh.
+function wireEdit(row, r) {
+  row.addEventListener("click", (ev) => {
+    if (ev.target.closest("a") || ev.target.closest(".editrow") || EDITING) return;
+    if (ev.detail === 2) startEdit(row, r);
+  });
+  row.addEventListener("keydown", (ev) => {
+    if (ev.target !== row || EDITING) return;
+    if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); startEdit(row, r); }
+  });
+}
+function startEdit(row, r) {
+  if (EDITING) return;
+  EDITING = true;
+  row.classList.add("editing");
+  const cell = row.querySelector(".urlcell");
+  const old = cell.innerHTML;
+  cell.innerHTML = "";
+  const inp = document.createElement("input");
+  inp.className = "editinp"; inp.value = r.slug;
+  const actions = document.createElement("span");
+  actions.className = "editrow";
+  const mk = (label, fn, title) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.title = title; b.onclick = fn;
+    return b;
+  };
+  const save = mk("Save", async () => {
+    await fetch("/api/slug", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vmid: r.vmid, slug: inp.value }) });
+    EDITING = false; refresh();
+  }, "set the URL to <slug>.<domain>");
+  const def = mk("Default", async () => {
+    await fetch("/api/slug", { method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vmid: r.vmid }) });
+    EDITING = false; refresh();
+  }, "reset to the automatic slug");
+  const cancel = mk("Cancel", () => { cell.innerHTML = old; row.classList.remove("editing"); EDITING = false; }, "cancel");
+  actions.append(save, def, cancel);
+  inp.onkeydown = (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); save.onclick(); }
+    else if (ev.key === "Escape") { ev.preventDefault(); cancel.onclick(); }
+  };
+  cell.append(inp, actions);
+  inp.focus();
+}
 refresh();
-setInterval(refresh, 10000);
+setInterval(() => { if (EDITING) return; refresh(); }, 10000);
 </script>
 </body>
 </html>

@@ -10,8 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/macedot/traefik-proxmenux-provider/internal/dashboard"
 	"github.com/macedot/traefik-proxmenux-provider/internal/discover"
 	"github.com/macedot/traefik-proxmenux-provider/internal/generate"
+	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
 	"github.com/macedot/traefik-proxmenux-provider/internal/state"
 	"github.com/macedot/traefik-proxmenux-provider/internal/transform"
@@ -56,6 +59,9 @@ func main() {
 	logger := newLogger(cfg.Provider.LogLevel)
 	holder := state.New(version)
 	client := proxmenux.New(cfg.ProxMenux, logger)
+	store := overrides.Open(cfg.ProxMenux.OverridesPath)
+	resolveLAN(cfg)
+	resyncC := make(chan struct{}, 1)
 
 	// Auth contract: detect the monitor's posture once, re-detect on auth
 	// changes. Credentials are sent only in AuthToken mode; if the monitor
@@ -99,6 +105,20 @@ func main() {
 			holder.Update(snap)
 			return err
 		}
+
+		// Dashboard edits (overrides file) win over config slug_overrides.
+		if ov, oerr := store.Load(); oerr != nil {
+			logger.Warn("overrides load failed", "err", oerr)
+		} else if len(ov.SlugOverrides) > 0 {
+			merged := make(map[string]string, len(cfg.Domain.SlugOverrides)+len(ov.SlugOverrides))
+			for k, v := range cfg.Domain.SlugOverrides {
+				merged[k] = v
+			}
+			for k, v := range ov.SlugOverrides {
+				merged[k] = v
+			}
+			cfg.Domain.SlugOverrides = merged
+		}
 		result := transform.Transform(guests, cfg)
 		doc, err := generate.Render(result.Routes, cfg)
 		if err != nil {
@@ -133,6 +153,7 @@ func main() {
 		snap.TLSMode = cfg.TLS.Mode
 		snap.Entrypoint = cfg.Routing.Entrypoint
 		snap.AuthMode = string(authMode)
+		snap.EditEnabled = cfg.Dashboard.Edit
 		snap.GeneratedAt = time.Now()
 		snap.NextSyncAt = time.Now().Add(cfg.Provider.PollInterval.Std())
 		snap.Routes = result.Routes
@@ -147,7 +168,8 @@ func main() {
 
 	if cfg.Dashboard.Enabled && !*dryRun {
 		go func() {
-			if err := dashboard.Serve(ctx, cfg.Dashboard.Listen, holder, logger); err != nil {
+			opts := dashboard.Options{Edit: cfg.Dashboard.Edit, Store: store, Resync: resyncC}
+			if err := dashboard.Serve(ctx, cfg.Dashboard.Listen, holder, opts, logger); err != nil {
 				logger.Error("dashboard stopped", "err", err)
 			}
 		}()
@@ -170,10 +192,49 @@ func main() {
 		case <-ctx.Done():
 			logger.Info("shutting down")
 			return
+		case <-resyncC:
+			if err := sync(ctx); err != nil {
+				logger.Error("resync failed", "err", err)
+			}
 		case <-ticker.C:
 			if err := sync(ctx); err != nil {
 				logger.Error("sync failed", "err", err)
 			}
+		}
+	}
+}
+
+// resolveLAN fills ProxMenux.LANResolved: the explicit lan_cidr when set,
+// otherwise the provider's own /24 (guests usually report their VPN IP
+// first — target IPs must be picked from the reachable subnet).
+func resolveLAN(cfg *config.Config) {
+	if v := strings.TrimSpace(cfg.ProxMenux.LANCIDR); v != "" {
+		cfg.ProxMenux.LANResolved = v
+		return
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip4 := ipn.IP.To4()
+			if ip4 == nil || ip4.IsLoopback() || ip4.IsLinkLocalUnicast() {
+				continue
+			}
+			cfg.ProxMenux.LANResolved = ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+			return
 		}
 	}
 }

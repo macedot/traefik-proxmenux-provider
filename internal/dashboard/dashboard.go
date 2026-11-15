@@ -10,11 +10,15 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
 	"github.com/macedot/traefik-proxmenux-provider/internal/state"
+	"github.com/macedot/traefik-proxmenux-provider/internal/transform"
 )
 
 //go:embed static/index.html
@@ -32,8 +36,9 @@ func readOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// NewMux builds the read-only handler set.
-func NewMux(h *state.Holder) *http.ServeMux {
+// NewMux builds the handler set: read-only views plus (when o.Edit) the
+// single mutation endpoint — slug overrides, persisted locally.
+func NewMux(h *state.Holder, o Options) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", readOnly(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -56,14 +61,83 @@ func NewMux(h *state.Holder) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
+	mux.HandleFunc("/api/slug", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON := func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			w.Header().Set("Allow", "POST, DELETE")
+			writeJSON(http.StatusMethodNotAllowed, map[string]string{"error": "POST or DELETE only"})
+			return
+		}
+		if !o.Edit || o.Store == nil {
+			writeJSON(http.StatusForbidden, map[string]string{"error": "editing is disabled (dashboard.edit: false)"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "read body"})
+			return
+		}
+		var req struct {
+			VMID int    `json:"vmid"`
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || req.VMID <= 0 {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid required"})
+			return
+		}
+		key := strconv.Itoa(req.VMID)
+		switch r.Method {
+		case http.MethodPost:
+			slug := transform.Slugify(req.Slug)
+			if slug == "" {
+				writeJSON(http.StatusBadRequest, map[string]string{"error": "slug must contain alphanumeric characters"})
+				return
+			}
+			if err := o.Store.SetSlug(key, slug); err != nil {
+				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			signalResync(o)
+			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "slug": slug})
+		case http.MethodDelete:
+			existed, err := o.Store.ClearSlug(key)
+			if err != nil {
+				writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			signalResync(o)
+			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "cleared": existed})
+		}
+	})
 	return mux
 }
 
+func signalResync(o Options) {
+	if o.Resync == nil {
+		return
+	}
+	select {
+	case o.Resync <- struct{}{}:
+	default: // a resync is already pending
+	}
+}
+
+// Options wires the dashboard to the provider runtime.
+type Options struct {
+	Edit   bool             // allow slug edits (POST/DELETE /api/slug)
+	Store  *overrides.Store // overrides persistence (required when Edit)
+	Resync chan struct{}    // signalled after a successful edit
+}
+
 // Serve runs the dashboard until ctx is cancelled.
-func Serve(ctx context.Context, listen string, h *state.Holder, log *slog.Logger) error {
+func Serve(ctx context.Context, listen string, h *state.Holder, o Options, log *slog.Logger) error {
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           NewMux(h),
+		Handler:           NewMux(h, o),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

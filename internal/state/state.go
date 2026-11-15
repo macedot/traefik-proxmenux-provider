@@ -20,6 +20,7 @@ type Snapshot struct {
 	NextSyncAt  time.Time           `json:"next_sync_at"`
 	SyncCount   uint64              `json:"sync_count"`
 	LastError   string              `json:"last_error,omitempty"`
+	EditEnabled bool                `json:"edit_enabled"`
 	Routes      []transform.Route   `json:"routes"`
 	Skipped     []transform.Skipped `json:"skipped"`
 }

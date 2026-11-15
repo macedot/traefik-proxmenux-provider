@@ -136,7 +136,12 @@ per container — it already holds all of that after each sync.
 
 Per container: app name + vmid, `https://<slug>.<domain>` link, target
 `ip:port`, TLS mode, probe result — and when a route is skipped, the reason
-(probe failed, denied, stopped, collision). Header: last/next sync, exposed /
+(probe failed, denied, stopped, collision).
+
+**Editing:** double-click a published URL (or focus the row and hit Enter/F2)
+to rename it — `<slug>.<domain>` updates in seconds and persists to
+`overrides.json` next to the config; "Default" resets to the automatic slug.
+Disabled with `dashboard.edit: false`. Header: last/next sync, exposed /
 skipped counts, source filter, poll interval. Same data as JSON at
 `GET /api/routes` for scripts or other tools.
 

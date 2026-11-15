@@ -97,7 +97,7 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 			}
 			continue
 		}
-		if strings.TrimSpace(g.IP) == "" {
+		if strings.TrimSpace(g.IP) == "" && len(g.IPs) == 0 {
 			for _, w := range g.AppWatches {
 				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: w.Name, Reason: "no IP reported by monitor"})
 			}
@@ -151,18 +151,19 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 			}
 
 			p := w.Ports[0]
+			gip := pickIP(g, cfg)
 			candidates = append(candidates, candidate{route: Route{
 				Slug:       slug,
 				Hostname:   slug + "." + cfg.Domain.Base,
 				AppName:    w.Name,
 				VMID:       g.VMID,
 				GuestName:  g.Name,
-				IP:         strings.TrimSpace(g.IP),
+				IP:         gip,
 				Scheme:     portScheme(p),
 				Port:       p.Port,
 				WebPath:    p.WebPath,
 				HealthPath: healthPath(w),
-				Target:     fmt.Sprintf("%s://%s:%d", portScheme(p), strings.TrimSpace(g.IP), p.Port),
+				Target:     fmt.Sprintf("%s://%s:%d", portScheme(p), gip, p.Port),
 			}})
 		}
 	}
@@ -182,6 +183,35 @@ func Transform(guests []proxmenux.Guest, cfg *config.Config) *Result {
 		res.Routes = append(res.Routes, r)
 	}
 	return res
+}
+
+// pickIP chooses the best target IP for a guest: prefer an address inside
+// the LAN subnet (guests behind gluetun/VPN report the VPN IP first, which
+// is unreachable from the Traefik CT). Falls back to the first reported IP.
+func pickIP(g proxmenux.Guest, cfg *config.Config) string {
+	seen := map[string]bool{}
+	var cands []string
+	for _, c := range append([]string{g.IP}, g.IPs...) {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		cands = append(cands, c)
+	}
+	if len(cands) == 0 {
+		return ""
+	}
+	if cidr := strings.TrimSpace(cfg.ProxMenux.LANResolved); cidr != "" {
+		if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
+			for _, c := range cands {
+				if ip := net.ParseIP(c); ip != nil && ipnet.Contains(ip) {
+					return c
+				}
+			}
+		}
+	}
+	return cands[0]
 }
 
 func resolveSlug(w proxmenux.Watch, g proxmenux.Guest, cfg *config.Config) string {

@@ -89,6 +89,7 @@ func TestTransformHappyPath(t *testing.T) {
 
 func TestTransformSkips(t *testing.T) {
 	cfg := base()
+	cfg.ProxMenux.Source = "oci" // exercise the OCI filter explicitly
 	guests := []proxmenux.Guest{
 		guest(113, "plex", "10.0.0.9", "stopped", watch("Plex", "oci_image", 32400)),                         // not running
 		guest(114, "noip", "", "running", watch("NoIP", "oci_image", 80)),                                    // no IP
@@ -207,5 +208,47 @@ func TestTransformProbeDisabled(t *testing.T) {
 	res := Transform([]proxmenux.Guest{g}, cfg)
 	if len(res.Routes) != 1 {
 		t.Fatalf("probe disabled should publish: %+v", res.Skipped)
+	}
+}
+
+func TestPickIPPrefersLanSubnet(t *testing.T) {
+	_, port, stop := openPort(t)
+	defer stop()
+
+	cfg := base()
+	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
+	// Arr-style guest: monitor reports the VPN IP first, LAN IP second.
+	g := guest(109, "qbittorrent", "198.51.100.33", "running", watch("Qbittorrent", "oci_image", port))
+	g.IPs = []string{"127.0.0.1", "198.51.100.33"}
+	res := Transform([]proxmenux.Guest{g}, cfg)
+	if len(res.Routes) != 1 {
+		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
+	}
+	if res.Routes[0].IP != "127.0.0.1" || res.Routes[0].Target != "http://127.0.0.1:"+itoa(port) {
+		t.Errorf("ip/target = %s / %s, want LAN IP picked", res.Routes[0].IP, res.Routes[0].Target)
+	}
+}
+
+func TestPickIPFallsBackToFirst(t *testing.T) {
+	cfg := base()
+	cfg.Routing.Probe = false // target unreachable; only liveness of the pick matters
+	g := guest(115, "byparr", "198.51.100.39", "running", watch("FlareSolverr", "oci_image", 8191))
+	g.IPs = []string{"198.51.100.39"}
+	cfg.ProxMenux.LANResolved = "127.0.0.0/24"
+	res := Transform([]proxmenux.Guest{g}, cfg)
+	if len(res.Routes) != 1 || res.Routes[0].IP != "198.51.100.39" {
+		t.Fatalf("fallback pick wrong: %+v", res.Routes)
+	}
+}
+
+func TestSidecarsIncludedInWatchesMode(t *testing.T) {
+	host, port, stop := openPort(t)
+	defer stop()
+
+	cfg := base() // default source = watches
+	g := guest(111, "sonarr", host, "running", watch("Sonarr", "user_sidecar", port))
+	res := Transform([]proxmenux.Guest{g}, cfg)
+	if len(res.Routes) != 1 || res.Routes[0].Slug != "sonarr" {
+		t.Fatalf("sidecar not published in watches mode: %+v (%+v)", res.Routes, res.Skipped)
 	}
 }

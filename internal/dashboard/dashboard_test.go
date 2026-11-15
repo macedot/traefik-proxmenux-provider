@@ -3,12 +3,15 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
 	"github.com/macedot/traefik-proxmenux-provider/internal/state"
 	"github.com/macedot/traefik-proxmenux-provider/internal/transform"
 )
@@ -20,6 +23,8 @@ func TestHandlers(t *testing.T) {
 	snap.TLSMode = "internal"
 	snap.Source = "oci"
 	snap.Entrypoint = "websecure"
+	snap.AuthMode = "open"
+	snap.EditEnabled = false
 	snap.GeneratedAt = time.Now()
 	snap.Routes = []transform.Route{{
 		Slug: "adguard-home", Hostname: "adguard-home.home.example.com",
@@ -29,7 +34,7 @@ func TestHandlers(t *testing.T) {
 	snap.Skipped = []transform.Skipped{{VMID: 117, AppName: "Dead App", Reason: "probe failed"}}
 	h.Update(snap)
 
-	srv := httptest.NewServer(NewMux(h))
+	srv := httptest.NewServer(NewMux(h, Options{}))
 	defer srv.Close()
 	cli := srv.Client()
 
@@ -90,7 +95,7 @@ func TestServeShutdown(t *testing.T) {
 	h := state.New("t")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, "127.0.0.1:0", h, discardLogger()) }()
+	go func() { done <- Serve(ctx, "127.0.0.1:0", h, Options{}, discardLogger()) }()
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 	select {
@@ -100,5 +105,86 @@ func TestServeShutdown(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Serve did not shut down")
+	}
+}
+
+func TestSlugEditEndpoint(t *testing.T) {
+	h := state.New("t")
+	dir := t.TempDir()
+	store := overrides.Open(filepath.Join(dir, "overrides.json"))
+	resync := make(chan struct{}, 1)
+	srv := httptest.NewServer(NewMux(h, Options{Edit: true, Store: store, Resync: resync}))
+	defer srv.Close()
+	cli := srv.Client()
+
+	// POST persists + signals resync.
+	resp, err := cli.Post(srv.URL+"/api/slug", "application/json",
+		strings.NewReader(`{"vmid":100,"slug":"My DNS!"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"slug":"my-dns"`) {
+		t.Fatalf("POST status=%d body=%s", resp.StatusCode, body)
+	}
+	f, err := store.Load()
+	if err != nil || f.SlugOverrides["100"] != "my-dns" {
+		t.Fatalf("overrides file = %+v err=%v", f, err)
+	}
+	select {
+	case <-resync:
+	default:
+		t.Error("resync not signalled")
+	}
+
+	// DELETE clears it.
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/slug",
+		strings.NewReader(`{"vmid":100}`))
+	resp2, err := cli.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Fatalf("DELETE status=%d", resp2.StatusCode)
+	}
+	f2, _ := store.Load()
+	if len(f2.SlugOverrides) != 0 {
+		t.Fatalf("override not cleared: %+v", f2.SlugOverrides)
+	}
+}
+
+func TestSlugEditDisabled(t *testing.T) {
+	h := state.New("t")
+	srv := httptest.NewServer(NewMux(h, Options{}))
+	defer srv.Close()
+	resp, err := srv.Client().Post(srv.URL+"/api/slug", "application/json",
+		strings.NewReader(`{"vmid":100,"slug":"x"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 when editing disabled", resp.StatusCode)
+	}
+}
+
+func TestSlugEditValidation(t *testing.T) {
+	h := state.New("t")
+	store := overrides.Open(filepath.Join(t.TempDir(), "overrides.json"))
+	resync := make(chan struct{}, 1)
+	srv := httptest.NewServer(NewMux(h, Options{Edit: true, Store: store, Resync: resync}))
+	defer srv.Close()
+
+	for _, body := range []string{`{"vmid":100,"slug":"!!!"}`, `{"slug":"x"}`, `not json`} {
+		resp, err := srv.Client().Post(srv.URL+"/api/slug", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST %q: %v", body, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Fatalf("POST %q status = %d, want 400", body, resp.StatusCode)
+		}
 	}
 }

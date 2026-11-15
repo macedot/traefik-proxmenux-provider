@@ -25,8 +25,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.TLS.Mode != "internal" {
 		t.Errorf("tls.mode default = %q, want internal", cfg.TLS.Mode)
 	}
-	if cfg.ProxMenux.Source != "oci" {
-		t.Errorf("proxmenux.source default = %q, want oci", cfg.ProxMenux.Source)
+	if cfg.ProxMenux.Source != "watches" {
+		t.Errorf("proxmenux.source default = %q, want watches", cfg.ProxMenux.Source)
 	}
 	if cfg.Routing.Probe != true {
 		t.Error("routing.probe must default to true")
