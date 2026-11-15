@@ -84,6 +84,12 @@ Same data as JSON: `GET /api/routes`.
 - Atomic writes with `.bak`; no other file under `conf.d` is ever touched
 - `gosec` + `go vet` + race tests in CI
 
+Detailed docs live in [`docs/`](docs/): [architecture](docs/architecture.md),
+[route pipeline](docs/route-pipeline.md), [configuration
+reference](docs/configuration.md), [dashboard](docs/dashboard.md),
+[HTTP API](docs/api.md), [security model](docs/security.md), and
+[operations](docs/operations.md).
+
 Full engineering detail (threat model, decisions, test plan):
 [PLAN.md](PLAN.md).
 
