@@ -29,6 +29,7 @@ ProxMenux monitor API (PVE host :8008)
     → expose.allow / expose.deny applied
     → render Traefik file-provider YAML (routers + services + TLS)
     → atomic write of ONLY conf.d/proxmenux-generated.yaml (with .bak)
+    → embedded dashboard serves the sync state (read-only HTML + JSON)
 Traefik file provider hot-reloads — no restart, no static config changes
 ```
 
@@ -89,6 +90,11 @@ host by ProxDnx.
    `go vet` + tests in CI, goreleaser static binaries.
 10. **Tests are a first-class deliverable** — table-driven unit tests with
     fixtures captured from real API shapes; `--dry-run` integration mode.
+11. **Provider dashboard is read-only by construction** — serves only the
+    last sync state: no mutation endpoints, no secrets rendered, no config
+    writes. Direct access is a plain LAN bind; the recommended path routes it
+    through Traefik (`dashboard.via_traefik`) with a CIDR allowlist, so it is
+    never reachable from an unprotected entrypoint.
 
 ## Configuration
 
@@ -106,13 +112,34 @@ Key choices (**bold** = default):
 | `domain.slug_source` | **watch** ("AdGuard Home" → `adguard-home`) · hostname |
 | `routing.probe` | **true** |
 | `expose.dashboard.enabled` | **false** |
+| `dashboard.enabled` | **true** (read-only provider UI) |
+
+## Dashboard (ProxDnx-style)
+
+The provider embeds a **read-only status UI** showing every URL it generated,
+per container — it already holds all of that after each sync.
+
+Per container: app name + vmid, `https://<slug>.<domain>` link, target
+`ip:port`, TLS mode, probe result — and when a route is skipped, the reason
+(probe failed, denied, stopped, collision). Header: last/next sync, exposed /
+skipped counts, source filter, poll interval. Same data as JSON at
+`GET /api/routes` for scripts or other tools.
+
+| Access path | URL | Security |
+|---|---|---|
+| Traefik-routed (recommended) | `https://provider.<domain>` (`via_traefik: true`) | same generated TLS + CIDR allowlist |
+| Direct | `http://<traefik-ct>:8081` (`listen`) | LAN bind only |
+
+Read-only by construction: no mutation endpoints, no secrets rendered. Ships
+in M1 alongside the core — the UI is just the sync state the provider keeps
+anyway.
 
 ## Milestones
 
 | M | Scope | Status |
 |---|---|---|
 | M0 | Scaffold: PLAN.md, config.example.yaml, README, MIT (derived-from) | ✅ done |
-| M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run` + unit tests | planned |
+| M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run`, embedded read-only dashboard (HTML + `/api/routes`) + unit tests | planned |
 | M2 | Packaging: hardened systemd unit, `install.sh` / `uninstall.sh` | planned |
 | M3 | Live on pve-host the-traefik-host + hardening: monitor auth + token, `api.insecure` fix | planned |
 | M4 | CI, docs, goreleaser `v0.1.0` | planned |
@@ -133,8 +160,9 @@ Key choices (**bold** = default):
 - **Phase 1 — dry run (no side effects):** cross-compile, push binary into
   the-traefik-host, `--once --dry-run`, review slugs/targets against live app_watches.
 - **Phase 2 — live (`tls.mode: internal`):** install the unit, verify the
-  generated file, dashboard routers, `curl --resolve` checks; route count ==
-  dry-run count.
+  generated file, Traefik dashboard routers, provider dashboard lists every
+  route with probe status, `curl --resolve` checks; route count == dry-run
+  count.
 - **Phase 3 — hardening:** enable monitor auth + token (re-test with
   `token_file`), disable `api.insecure`, publish the dashboard router.
 - **Rollback:** disable unit + `rm conf.d/proxmenux-generated.yaml` → conf.d

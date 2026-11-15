@@ -60,6 +60,18 @@ expose:
                               # the secure replacement for api.insecure
     # allow_cidrs: ["10.0.0.0/8"]
 
+dashboard:
+  enabled: true               # built-in read-only status UI (ProxDnx-style):
+                              # every generated URL per container, probe
+                              # results, skip reasons, sync times.
+                              # JSON endpoint: GET /api/routes
+  listen: ":8081"             # bind addr; "127.0.0.1:8081" = localhost only
+  via_traefik: false          # also publish https://<hostname>.<domain> through
+                              # Traefik (same generated TLS) with CIDR
+                              # allowlist — recommended access path
+  # hostname: provider        # subdomain when via_traefik: true
+  # allow_cidrs: ["192.0.2.0/25"]
+
 output:
   file: /etc/traefik/conf.d/proxmenux-generated.yaml
   mode: 0o644

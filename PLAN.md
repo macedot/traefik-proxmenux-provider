@@ -90,6 +90,11 @@ ProxMenux monitor API (PVE host :8008)
     → atomic write (tmp + fsync + rename) of ONLY the output file; keep .bak
 Traefik file provider hot-reloads (verify watch behavior on the-traefik-host in M3; if
 watch defaults off, a one-line static-config addition is needed, user-approved)
+
+Embedded dashboard: serves the last sync state — read-only HTML +
+GET /api/routes (per-container URL, target, probe status, skip reason).
+Access: direct LAN bind (dashboard.listen) or Traefik-routed with CIDR
+allowlist (dashboard.via_traefik) — recommended.
 ```
 
 ## 5. Security model (requirements, not options)
@@ -126,6 +131,11 @@ watch defaults off, a one-line static-config addition is needed, user-approved)
 10. **Tests are a first-class deliverable** (project standard): table-driven
     unit tests for client / transform / generate with fixtures captured from
     the real API shapes; `--dry-run` integration mode.
+11. **Provider dashboard is read-only by construction.** Embedded UI serves
+    only the last sync state — no mutation endpoints, no secrets rendered,
+    no config writes. Direct access is a plain LAN bind; the recommended
+    path routes it through Traefik (`dashboard.via_traefik`) with a CIDR
+    allowlist, so it is never reachable from an unprotected entrypoint.
 
 ## 6. Configuration
 
@@ -141,6 +151,7 @@ internal/config/           # strict YAML load, validation, safe defaults
 internal/proxmenux/        # monitor API client (bearer, timeouts, caps)
 internal/transform/        # guests+app_watches → routes (slug, probe, allow/deny)
 internal/generate/         # Traefik file-provider YAML rendering + atomic writer
+internal/dashboard/        # read-only status UI (HTML + /api/routes)
 internal/generate/testdata/  # fixtures from real API shapes
 deploy/traefik-proxmenux-provider.service   # hardened unit
 install.sh / uninstall.sh  # prompts → config.yaml + token 0600 + unit
@@ -153,7 +164,7 @@ config.example.yaml  PLAN.md  README.md  LICENSE  Makefile
 | M | Scope | Acceptance |
 |---|---|---|
 | M0 | Scaffold repo: PLAN.md, config.example.yaml, README stub, MIT LICENSE (derived-from note), push to GitHub | repo exists, docs reviewable |
-| M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run` | `go test ./...` green; dry-run against live monitor API produces sane YAML |
+| M1 | Core Go: config loader, monitor client, transform, generate, `--once --dry-run`, embedded read-only dashboard (HTML + `/api/routes`) | `go test ./...` green; dry-run against live monitor API produces sane YAML; dashboard renders the dry-run state |
 | M2 | Packaging: hardened systemd unit, `install.sh` (prompts: domain, email, TLS mode; token optional), `uninstall.sh` | clean install → unit active → generated file appears |
 | M3 | Live on pve-host the-traefik-host (see §9) | routes verified via dashboard + curl; rollback tested |
 | M4 | CI, README (quickstart + security model), goreleaser `v0.1.0` | CI green, release published |
@@ -171,7 +182,9 @@ pct exec 300 -- tp-provider --config /tmp/config-test.yaml --once --dry-run
 ```
 Phase 2 — live (`tls.mode: internal` first):
 - write real config to `/etc/traefik-proxmenux/config.yaml` (0600), install unit
-- verify: generated file exists in conf.d; dashboard shows routers; 
+- verify: generated file exists in conf.d; Traefik dashboard shows the
+  generated routers; provider dashboard (`dashboard.listen` / `via_traefik`
+  hostname) lists every route with probe status;
   `curl -sk --resolve adguard.<domain>:443:127.0.0.1 https://adguard.<domain>/`
   returns the app; routes count == dry-run count
 Phase 3 — hardening (each user-approved, not silent):
