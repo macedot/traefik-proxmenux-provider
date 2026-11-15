@@ -120,7 +120,6 @@ async function load(){
       const ch=document.createElement("div");ch.className="chips";
       ch.innerHTML='<span class="chip">🖥 <b>'+esc(x.guest_name)+'</b></span><span class="chip"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</span>';
       if(s.edit_enabled){
-        const flagsEl=flags?fl:null;
         const t=document.createElement("button");t.className="ebtn tgl";
         t.textContent=x.disabled?"▶ enable":"⏸ disable";
         t.title=x.disabled?"re-enable this route":"stop serving this route (card stays visible)";
