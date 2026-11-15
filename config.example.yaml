@@ -46,6 +46,9 @@ tls:
   # dns_credentials_file: /etc/traefik-proxmenux/dns.env  # 0600, provider creds
 
 routing:
+  default_enabled: true       # apps are served unless toggled off in the dashboard.
+                               # false = opt-in: every app starts disabled (grayed card)
+                               # until enabled one by one from the dashboard.
   entrypoint: websecure       # entryPoint receiving generated routers
   # middlewares: []           # extra middlewares on every router,
                               # e.g. [secure-headers@file]
