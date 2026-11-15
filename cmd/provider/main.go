@@ -63,6 +63,12 @@ func main() {
 	if err := resolveLAN(cfg); err != nil {
 		logger.Warn("could not auto-detect LAN subnet; add proxmenux.lan_cidr to config", "err", err)
 	}
+	// Pristine config slug overrides — the merge target must never be the
+	// map the previous sync mutated, or cleared overrides would stick.
+	baseSlugOverrides := make(map[string]string, len(cfg.Domain.SlugOverrides))
+	for k, v := range cfg.Domain.SlugOverrides {
+		baseSlugOverrides[k] = v
+	}
 	resyncC := make(chan struct{}, 1)
 
 	// Auth contract: detect the monitor's posture once, re-detect on auth
@@ -111,9 +117,9 @@ func main() {
 		// Dashboard edits (overrides file) win over config slug_overrides.
 		if ov, oerr := store.Load(); oerr != nil {
 			logger.Warn("overrides load failed", "err", oerr)
-		} else if len(ov.SlugOverrides) > 0 {
-			merged := make(map[string]string, len(cfg.Domain.SlugOverrides)+len(ov.SlugOverrides))
-			for k, v := range cfg.Domain.SlugOverrides {
+		} else {
+			merged := make(map[string]string, len(baseSlugOverrides)+len(ov.SlugOverrides))
+			for k, v := range baseSlugOverrides {
 				merged[k] = v
 			}
 			for k, v := range ov.SlugOverrides {
