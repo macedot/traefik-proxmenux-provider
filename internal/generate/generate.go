@@ -234,15 +234,15 @@ func WriteAtomic(path string, mode os.FileMode, backup bool, data []byte) (bool,
 	defer func() { _ = os.Remove(tmpName) }() // no-op after successful rename
 
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return false, fmt.Errorf("chmod temp file: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return false, fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return false, fmt.Errorf("fsync temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
