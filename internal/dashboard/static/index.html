@@ -20,6 +20,8 @@
   section#static{padding:0 32px 30px}
   section#static h2{margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:border-color .15s,transform .15s;-webkit-user-select:none;user-select:none}
+  .card.editing{border-color:var(--accent);animation:editpulse 1.1s ease-in-out infinite}
+  @keyframes editpulse{0%,100%{opacity:1}50%{opacity:.55}}
   .card:hover{border-color:var(--accent);transform:translateY(-1px)}
   .card a.domain{display:block;font-size:16px;font-weight:600;color:var(--link);text-decoration:none;word-break:break-word}
   .card a.domain:hover{text-decoration:underline}
@@ -58,11 +60,25 @@
 <script>
 function esc(s){const d=document.createElement("div");d.textContent=s==null?"":String(s);return d.innerHTML}
 function proto(){return location.protocol}
+// waitSync polls /api/routes until pred(route) holds or ~9s pass, so the
+// card keeps its edit animation until the provider actually republished.
+async function waitSync(vmid,pred){
+  for(let i=0;i<10;i++){
+    await new Promise(r=>setTimeout(r,900));
+    try{
+      const s=await (await fetch("/api/routes",{cache:"no-store"})).json();
+      const r=(s.routes||[]).find(v=>v.vmid===vmid&&v.kind==="app");
+      if(r&&pred(r))return true;
+    }catch(e){}
+  }
+  return false;
+}
 // click-to-edit: rename the published URL (service name never changes);
 // auto-refresh pauses while an edit is open
 let EDITING=false;let sDomains=[];
 function startEdit(card,x,link){
   if(EDITING)return;EDITING=true;
+  card.classList.add("editing"); // pulse until the edit is applied
   const row=document.createElement("div");row.className="editrow";
   const inp=document.createElement("input");inp.className="nameinput";
   inp.value=x.slug;inp.maxLength=63;inp.autocomplete="off";inp.spellcheck=false;
@@ -80,14 +96,22 @@ function startEdit(card,x,link){
   const def=document.createElement("button");def.className="ebtn";def.textContent="↺ default";
   const cancel=document.createElement("button");cancel.className="ebtn";cancel.textContent="✕ discard";
   save.onclick=async()=>{
+    if(save.disabled)return;
+    save.disabled=true;save.textContent="⟳ syncing";
     const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({vmid:x.vmid,slug:inp.value,domain:sel.value})});
-    if(!r.ok){const j=await r.json().catch(()=>({}));save.textContent=j.error||"error";return}
+    if(!r.ok){const j=await r.json().catch(()=>({}));save.disabled=false;save.textContent=j.error||"error";return}
+    // server slugifies; mirror it to detect the republished hostname
+    const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    await waitSync(x.vmid,rt=>rt.hostname===slug+"."+sel.value);
     EDITING=false;load();
   };
   def.onclick=async()=>{
+    if(def.disabled)return;
+    def.disabled=true;def.textContent="⟳ syncing";
     await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({vmid:x.vmid})});
+    await waitSync(x.vmid,rt=>rt.hostname!==x.hostname);
     EDITING=false;load();
   };
   cancel.onclick=()=>{EDITING=false;load();};
