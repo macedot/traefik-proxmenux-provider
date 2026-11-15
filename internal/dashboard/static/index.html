@@ -19,6 +19,8 @@
   main{padding:18px 32px 0}
   .dsec{padding:0 32px 26px}
   section#static h2,.dhead{margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+  .dhead{cursor:pointer;-webkit-user-select:none;user-select:none}
+  .dhead .fold{display:inline-block;width:1.1em}
   .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:border-color .15s,transform .15s;-webkit-user-select:none;user-select:none}
   .card.editing{border-color:var(--accent);animation:editpulse 1.1s ease-in-out infinite}
   @keyframes editpulse{0%,100%{opacity:1}50%{opacity:.55}}
@@ -194,10 +196,18 @@ async function load(){
       const list=byDomain.get(d);
       const sec=document.createElement("section");sec.className="dsec";
       const h=document.createElement("h2");h.className="dhead";
-      h.textContent=d+" · "+list.length+(list.length===1?" app":" apps");
+      h.innerHTML='<span class="fold"></span> '+esc(d)+" · "+list.length+(list.length===1?" app":" apps");
       const dg=document.createElement("div");dg.className="dgrid";
       list.forEach(x=>dg.appendChild(makeCard(x)));
       sec.append(h,dg);
+      // foldable: click the header; per-domain state survives reloads
+      const key="pmp-fold-"+d;let folded=false;
+      try{folded=localStorage.getItem(key)==="1"}catch(e){}
+      const apply=()=>{dg.style.display=folded?"none":"";
+        const f=h.querySelector(".fold");if(f)f.textContent=folded?"▸":"▾";};
+      h.title="click to fold/unfold";
+      h.onclick=()=>{folded=!folded;try{localStorage.setItem(key,folded?"1":"0")}catch(e){}apply();};
+      apply();
       g.appendChild(sec);
     });
     if(apps.length===0)g.innerHTML='<div class="empty">waiting for the first sync…</div>';
