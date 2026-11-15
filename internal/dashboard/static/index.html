@@ -168,7 +168,33 @@ async function load(){
     const s=await (await fetch("/api/routes",{cache:"no-store"})).json();
     const g=document.getElementById("grid");
     g.innerHTML="";
+    // aggregate state of one domain's children:
+    // 🟢 all serving · 🔴 none serving · 🟠 something starting/stopping · 🔵 partial
+    const domainDot=(d)=>{
+      const kids=[];
+      viewData.forEach((v)=>{if(v.kind==="app"&&v.domain===d)kids.push(v)});
+      for(const k of inflight){
+        const v=viewData.get(k);
+        if(v&&v.kind==="app"&&v.domain===d)return {t:"🟠",title:"starting/stopping…"};
+      }
+      const isOff=(s.domains_off||[]).includes(d);
+      const serving=kids.filter(k=>k.served).length;
+      if(isOff)return {t:"🔴",title:"domain off — click to enable all its apps"};
+      if(kids.length&&serving===kids.length)return {t:"🟢",title:"all apps serving — click to switch the domain off"};
+      if(serving===0)return {t:"🔴",title:"all stopped — click to enable the domain"};
+      return {t:"🔵",title:"partially running ("+serving+"/"+kids.length+")"};
+    };
+    const refreshDomainDot=(d)=>{
+      const ddot=ddots.get(d);
+      if(!ddot)return;
+      const st=domainDot(d);
+      ddot.textContent=st.t;
+      ddot.title=st.title;
+    };
+    const ddots=new Map();
     const views=new Map(); // card key -> element, for in-place patching
+    const viewData=new Map(); // card key -> last known route
+    const inflight=new Set(); // card keys with a toggle/apply in flight
     const apps=(s.routes||[]).filter(r=>r.kind==="app");
     const makeCard=(x)=>{
       const c=document.createElement("div");c.className="card"+((x.stale||x.disabled)?" dim":"");
@@ -195,19 +221,24 @@ async function load(){
         t.onclick=async()=>{
           if(t.disabled)return;
           const want=!x.disabled;
+          const key="v"+x.vmid;
+          inflight.add(key);refreshDomainDot(x.domain);
           t.disabled=true;t.textContent="🟠";t.title="applying…";
           const r=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
             body:JSON.stringify({vmid:x.vmid,disabled:!x.disabled})});
-          if(!r.ok){const j=await r.json().catch(()=>({}));t.disabled=false;t.textContent=j.error||"error";return}
+          if(!r.ok){const j=await r.json().catch(()=>({}));t.disabled=false;t.textContent=j.error||"error";
+            inflight.delete(key);refreshDomainDot(x.domain);return}
           await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.served===want});
           // patch this card in place instead of reloading the whole page
           try{
             const s2=await (await fetch("/api/routes",{cache:"no-store"})).json();
             const rt=(s2.routes||[]).find(v=>v.kind==="app"&&v.vmid===x.vmid);
             if(rt){const nel=makeCard(rt,s2);const old=views.get("v"+x.vmid);
-              if(old&&old.parentNode)old.replaceWith(nel);views.set("v"+x.vmid,nel);}
+              if(old&&old.parentNode)old.replaceWith(nel);views.set("v"+x.vmid,nel);
+              viewData.set("v"+x.vmid,rt);}
             else load();
           }catch(e){load()}
+          inflight.delete(key);refreshDomainDot(x.domain);
         };
         ch.appendChild(t);
       }
@@ -243,9 +274,11 @@ async function load(){
       h.innerHTML='<span class="fold"></span> '+esc(d)+" · "+list.length+(list.length===1?" app":" apps")
         +(s.edit_enabled?'<button class="ebtn tgl ddot" title=""></button>':"");
       const dg=document.createElement("div");dg.className="dgrid"+(isOff?" off":"");
-      list.forEach(x=>{const el=makeCard(x);views.set("v"+x.vmid,el);dg.appendChild(el);});
+      list.forEach(x=>{const el=makeCard(x);views.set("v"+x.vmid,el);viewData.set("v"+x.vmid,x);dg.appendChild(el);});
       sec.append(h,dg);
       const ddot=h.querySelector(".ddot");
+      ddots.set(d,ddot);
+      refreshDomainDot(d);
       if(ddot){
         const setD=()=>{ddot.textContent=isOff?"🔴":"🟢";
           ddot.title=isOff?"domain off — click to enable all its apps":"domain on — click to switch the whole domain off";};
