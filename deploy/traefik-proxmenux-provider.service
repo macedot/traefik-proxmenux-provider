@@ -1,0 +1,36 @@
+[Unit]
+Description=traefik-proxmenux-provider (ProxMenux apps -> Traefik routes)
+Documentation=https://github.com/macedot/traefik-proxmenux-provider
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/traefik-proxmenux-provider --config /etc/traefik-proxmenux/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+# Hardening: no privileges, no user dirs, no kernel access, fixed write paths.
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/traefik/conf.d /etc/traefik-proxmenux
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

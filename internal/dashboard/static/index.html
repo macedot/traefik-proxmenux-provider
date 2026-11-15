@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>traefik-proxmenux-provider</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --fg:#e6e9ef; --mut:#8b93a3; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; --bd:#262b36; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:24px; }
+  header { display:flex; flex-wrap:wrap; gap:18px; align-items:baseline; margin-bottom:14px; }
+  h1 { font-size:18px; margin:0; }
+  h1 .badge { color:var(--mut); font-weight:400; font-size:12px; margin-left:8px; }
+  .meta { color:var(--mut); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap; }
+  .meta b { color:var(--fg); font-weight:600; }
+  .counts { display:flex; gap:10px; margin-bottom:16px; }
+  .pill { background:var(--card); border:1px solid var(--bd); border-radius:8px; padding:6px 12px; font-size:13px; }
+  .pill b { margin-right:4px; }
+  .pill.ok b { color:var(--ok); } .pill.skip b { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--bd); border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:9px 12px; border-top:1px solid var(--bd); vertical-align:top; }
+  th { background:#1d222c; color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-top:none; }
+  tr:first-child td { border-top:none; }
+  a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; color:var(--mut); }
+  .status-ok { color:var(--ok); font-weight:600; }
+  .status-skip { color:var(--warn); font-weight:600; }
+  .err { color:var(--bad); font-size:13px; margin-bottom:12px; }
+  .empty { color:var(--mut); padding:18px; }
+  footer { color:var(--mut); font-size:12px; margin-top:16px; }
+  td.name b { display:block; }
+  td.name span { color:var(--mut); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>traefik-proxmenux-provider<span class="badge" id="ver"></span></h1>
+  <div class="meta">
+    <span>domain <b id="domain">—</b></span>
+    <span>tls <b id="tls">—</b></span>
+    <span>source <b id="source">—</b></span>
+    <span>entrypoint <b id="entrypoint">—</b></span>
+    <span>last sync <b id="last">—</b></span>
+    <span>next sync <b id="next">—</b></span>
+  </div>
+</header>
+<div class="err" id="err" hidden></div>
+<div class="counts">
+  <span class="pill ok"><b id="c-exposed">0</b> routes published</span>
+  <span class="pill skip"><b id="c-skipped">0</b> skipped</span>
+  <span class="pill"><b id="c-syncs">0</b> syncs</span>
+</div>
+<table id="tbl" hidden>
+  <thead><tr><th>Container / App</th><th>URL</th><th>Target</th><th>Status</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="empty" id="empty">Waiting for first sync…</div>
+<footer>Read-only view · <span class="mono">GET /api/routes</span> for JSON · routes are managed in <span class="mono">conf.d/proxmenux-generated.yaml</span></footer>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString() : "—";
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/routes", {cache:"no-store"})).json();
+    document.getElementById("ver").textContent = "v" + (s.version || "dev");
+    document.getElementById("domain").textContent = s.domain || "—";
+    document.getElementById("tls").textContent = s.tls_mode || "—";
+    document.getElementById("source").textContent = s.source || "—";
+    document.getElementById("entrypoint").textContent = s.entrypoint || "—";
+    document.getElementById("last").textContent = fmtTime(s.generated_at);
+    document.getElementById("next").textContent = fmtTime(s.next_sync_at);
+    document.getElementById("c-exposed").textContent = (s.routes || []).length;
+    document.getElementById("c-skipped").textContent = (s.skipped || []).length;
+    document.getElementById("c-syncs").textContent = s.sync_count || 0;
+    const err = document.getElementById("err");
+    err.hidden = !s.last_error; err.textContent = "last error: " + (s.last_error || "");
+
+    const rows = [];
+    for (const r of s.routes || []) {
+      rows.push(`<tr><td class="name"><b>${esc(r.app_name)}</b><span>vmid ${r.vmid} · ${esc(r.guest_name)}</span></td>` +
+        `<td><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener">https://${esc(r.hostname)}</a></td>` +
+        `<td class="mono">${esc(r.target)}</td>` +
+        `<td class="status-ok">✓ published</td></tr>`);
+    }
+    for (const k of s.skipped || []) {
+      rows.push(`<tr><td class="name"><b>${esc(k.app_name)}</b><span>vmid ${k.vmid} · ${esc(k.guest_name)}</span></td>` +
+        `<td class="mono">${esc(k.slug || "—")}</td><td class="mono">—</td>` +
+        `<td class="status-skip">⃠ ${esc(k.reason)}</td></tr>`);
+    }
+    const tbl = document.getElementById("tbl"), empty = document.getElementById("empty");
+    tbl.hidden = rows.length === 0; empty.hidden = rows.length > 0;
+    document.getElementById("rows").innerHTML = rows.join("");
+  } catch (e) { /* transient fetch error: keep last render */ }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
