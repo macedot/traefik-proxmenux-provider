@@ -44,6 +44,7 @@
   .editactions{display:flex;gap:6px;margin-top:8px}
   .ebtn{background:#262a30;border:1px solid var(--border);border-radius:6px;color:var(--muted);font:12px system-ui,sans-serif;padding:5px 10px;cursor:pointer}
   .ebtn:hover{color:var(--text)}
+  .ebtn:disabled,.nameinput:disabled{opacity:.5;cursor:wait}
   .ebtn.save{color:#7ee787;border-color:#2a4a2a}
   footer{padding:0 32px 26px;color:var(--muted);font-size:12px}
   footer a{color:var(--link)}
@@ -101,6 +102,27 @@ function startEdit(card,x,link){
     if(d===x.domain)o.selected=true;sel.appendChild(o);
   });
   if((sDomains||[]).length<2)sel.style.display="none";
+  // Enter = ok, Esc = cancel — same contract as the name input
+  sel.onkeydown=(ev)=>{
+    if(ev.key==="Enter"){ev.preventDefault();save.onclick();}
+    else if(ev.key==="Escape"){ev.preventDefault();cancel.onclick();}
+  };
+  // picking a domain applies immediately: gray + pulse the card until the
+  // route is republished under the new domain
+  sel.onchange=async()=>{
+    if(sel.disabled)return;
+    card.classList.add("editing"); // gray + pulse until updated
+    sel.disabled=true;save.disabled=true;def.disabled=true;save.textContent="⟳ syncing";
+    const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({vmid:x.vmid,slug:inp.value,domain:sel.value})});
+    if(!r.ok){const j=await r.json().catch(()=>({}));
+      card.classList.remove("editing");sel.disabled=false;save.disabled=false;def.disabled=false;
+      save.textContent=j.error||"error";return}
+    const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    const want=slug+"."+sel.value;
+    await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.hostname===want});
+    EDITING=false;load();
+  };
   row.append(inp,sel);
   const actions=document.createElement("div");actions.className="editactions";
   const save=document.createElement("button");save.className="ebtn save";save.textContent="✓ save";
@@ -141,6 +163,7 @@ async function load(){
     const s=await (await fetch("/api/routes",{cache:"no-store"})).json();
     const g=document.getElementById("grid");
     g.innerHTML="";
+    const views=new Map(); // card key -> element, for in-place patching
     const apps=(s.routes||[]).filter(r=>r.kind==="app");
     const makeCard=(x)=>{
       const c=document.createElement("div");c.className="card"+((x.stale||x.disabled)?" dim":"");
@@ -172,7 +195,14 @@ async function load(){
             body:JSON.stringify({vmid:x.vmid,disabled:!x.disabled})});
           if(!r.ok){const j=await r.json().catch(()=>({}));t.disabled=false;t.textContent=j.error||"error";return}
           await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.served===want});
-          load();
+          // patch this card in place instead of reloading the whole page
+          try{
+            const s2=await (await fetch("/api/routes",{cache:"no-store"})).json();
+            const rt=(s2.routes||[]).find(v=>v.kind==="app"&&v.vmid===x.vmid);
+            if(rt){const nel=makeCard(rt,s2);const old=views.get("v"+x.vmid);
+              if(old&&old.parentNode)old.replaceWith(nel);views.set("v"+x.vmid,nel);}
+            else load();
+          }catch(e){load()}
         };
         ch.appendChild(t);
       }
@@ -206,7 +236,7 @@ async function load(){
       const h=document.createElement("h2");h.className="dhead";
       h.innerHTML='<span class="fold"></span> '+esc(d)+" · "+list.length+(list.length===1?" app":" apps");
       const dg=document.createElement("div");dg.className="dgrid";
-      list.forEach(x=>dg.appendChild(makeCard(x)));
+      list.forEach(x=>{const el=makeCard(x);views.set("v"+x.vmid,el);dg.appendChild(el);});
       sec.append(h,dg);
       // foldable: click the header; per-domain state survives reloads
       const key="pmp-fold-"+d;let folded=false;
@@ -249,10 +279,12 @@ async function load(){
             body:JSON.stringify({key:r.key,disabled:!r.disabled})});
           if(!res.ok){const j=await res.json().catch(()=>({}));b.disabled=false;b.textContent=j.error||"error";return}
           await waitSync(rs=>{const rt=rs.find(v=>v.kind==="infra"&&v.key===r.key);return !!rt&&rt.served===want});
+          // infra cards: rebuild just the infra grid (small, keeps alignment)
           load();
         };
       }
       sg.appendChild(c);
+      views.set(r.key,c);
     });
     document.getElementById("static").hidden=infra.length===0;
     document.getElementById("ninfra").textContent=infra.length;
