@@ -1,9 +1,7 @@
 # Traefik ProxMenux Provider
 
 <p align="center">
-  <img src="https://cdn.simpleicons.org/proxmox/E57000" width="110" alt="Proxmox VE"/>
-  &nbsp;&nbsp;<span style="font-size:36px;font-weight:700;">+</span>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/MacRimi/ProxMenux/main/images/ProxMenux_128.png" width="110" alt="ProxMenux"/>
+  <img src=".assets/logo.png" alt="ProxMenux + Traefik Proxmox Provider"/>
 </p>
 
 A companion service for [ProxMenux](https://github.com/MacRimi/ProxMenux) that
