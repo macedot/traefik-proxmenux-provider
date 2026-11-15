@@ -7,6 +7,8 @@
 package transform
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -336,16 +338,48 @@ func ApplyToggle(routes []Route, disabled map[string]bool, cfg *config.Config) {
 	}
 }
 
-// ProbeRoute TCP-probes a route target and updates its staleness.
+// ProbeRoute probes a route target. http targets get a TCP dial; https
+// targets get a real TLS handshake with certificate verification. An
+// https target whose certificate cannot be verified for the dial address
+// (self-signed appliance certs addressed by IP) is flagged Insecure and
+// still served — generate attaches the shared pmp-insecure transport. A
+// target that does not answer at all is stale and not served.
 func ProbeRoute(r *Route, timeout time.Duration) {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(r.IP, strconv.Itoa(r.Port)), timeout)
+	addr := net.JoinHostPort(r.IP, strconv.Itoa(r.Port))
+	dialer := &net.Dialer{Timeout: timeout}
+	if r.Scheme != "https" {
+		conn, err := dialer.Dial("tcp", addr)
+		if err != nil {
+			r.Stale = true
+			r.Served = false
+			return
+		}
+		_ = conn.Close()
+		r.Stale = false
+		r.Insecure = false
+		r.Served = true
+		return
+	}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		MinVersion: tls.VersionTLS12, // verification left enabled on purpose
+	})
 	if err != nil {
+		var certErr *tls.CertificateVerificationError
+		if errors.As(err, &certErr) {
+			// answers TLS but the certificate cannot be validated for this
+			// address (self-signed, unknown CA, no IP SAN)
+			r.Insecure = true
+			r.Stale = false
+			r.Served = true
+			return
+		}
 		r.Stale = true
 		r.Served = false
 		return
 	}
 	_ = conn.Close()
 	r.Stale = false
+	r.Insecure = false
 	r.Served = true
 }
 

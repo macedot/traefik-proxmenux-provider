@@ -2,8 +2,12 @@ package transform
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
@@ -434,5 +438,39 @@ func TestSchemeAndPathHygiene(t *testing.T) {
 	}
 	if r := got["D"]; r.Scheme != "https" || r.WebPath != "/ok" {
 		t.Fatalf("D: scheme=%q web=%q", r.Scheme, r.WebPath)
+	}
+}
+
+func TestProbeRouteTLS(t *testing.T) {
+	// self-signed https backend (httptest uses its own untrusted CA)
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	defer tlsSrv.Close()
+	tu := strings.TrimPrefix(tlsSrv.URL, "https://")
+	host, portStr, _ := net.SplitHostPort(tu)
+	port, _ := strconv.Atoi(portStr)
+
+	r := Route{Slug: "t", Scheme: "https", IP: host, Port: port}
+	ProbeRoute(&r, 2*time.Second)
+	if !r.Served || r.Stale || !r.Insecure {
+		t.Fatalf("self-signed https must be served+insecure: %+v", r)
+	}
+
+	// plain http backend
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer plain.Close()
+	pu := strings.TrimPrefix(plain.URL, "http://")
+	ph, pp, _ := net.SplitHostPort(pu)
+	pport, _ := strconv.Atoi(pp)
+	r2 := Route{Slug: "t2", Scheme: "http", IP: ph, Port: pport}
+	ProbeRoute(&r2, 2*time.Second)
+	if !r2.Served || r2.Stale || r2.Insecure {
+		t.Fatalf("http must be served, not insecure: %+v", r2)
+	}
+
+	// closed port → stale
+	r3 := Route{Slug: "t3", Scheme: "http", IP: "127.0.0.1", Port: 1}
+	ProbeRoute(&r3, time.Second)
+	if r3.Served || !r3.Stale {
+		t.Fatalf("closed port must be stale: %+v", r3)
 	}
 }
