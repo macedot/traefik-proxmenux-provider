@@ -1,9 +1,14 @@
 // Package proxmenux is a read-only client for the ProxMenux monitor API.
 //
-// Security posture: optional Bearer token (read from a 0600 file, re-read
-// every poll so it can rotate without restart), fixed base URL, redirects
-// rejected (no credential/URL hop), response size capped, per-request
-// timeout.
+// Auth contract (if-and-only-if): the client detects whether the monitor
+// requires authentication. A Bearer token is sent *only* when the monitor
+// actually demands one; when the monitor is auth-free no credentials are
+// sent at all. Callers must Detect() first; SendToken stays false until
+// detection proves the monitor requires a token and accepts ours.
+//
+// Security posture: fixed base URL, redirects rejected, response size
+// capped, per-request timeout, token read from a 0600 file at poll time
+// (rotates without restart).
 package proxmenux
 
 import (
@@ -19,6 +24,20 @@ import (
 	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
+)
+
+// ErrAuthRequired is returned when the monitor demands authentication and
+// none (or none valid) was provided. Callers must not publish routes in
+// this state.
+var ErrAuthRequired = errors.New("monitor API requires authentication")
+
+// AuthMode is the detected authentication posture of the monitor API.
+type AuthMode string
+
+const (
+	AuthUnknown AuthMode = "unknown"
+	AuthOpen    AuthMode = "open"  // monitor accepts unauthenticated reads
+	AuthToken   AuthMode = "token" // monitor requires (and accepted) our Bearer token
 )
 
 // Guest is one entry of GET /api/vms.
@@ -54,10 +73,11 @@ type Port struct {
 
 // Client queries the monitor API.
 type Client struct {
-	base     string
-	tokenRef config.ProxMenux
-	http     *http.Client
-	log      *slog.Logger
+	base      string
+	tokenRef  config.ProxMenux
+	sendToken bool // set only after Detect() proves the monitor requires a token
+	http      *http.Client
+	log       *slog.Logger
 }
 
 func New(pc config.ProxMenux, log *slog.Logger) *Client {
@@ -74,30 +94,39 @@ func New(pc config.ProxMenux, log *slog.Logger) *Client {
 	}
 }
 
+// SendToken is called by the caller after a successful Detect(AuthToken);
+// credentials are never attached before that.
+func (c *Client) SendToken() { c.sendToken = true }
+
 func (c *Client) readToken() (string, error) {
 	if c.tokenRef.TokenFile == "" {
 		return "", nil
 	}
-	b, err := os.ReadFile(c.tokenRef.TokenFile)
+	b, err := os.ReadFile(c.tokenRef.TokenFile) // #nosec G304 -- admin-controlled config path
 	if err != nil {
 		return "", fmt.Errorf("read token file: %w", err)
 	}
 	return strings.TrimSpace(string(b)), nil
 }
 
-// ListGuests fetches and decodes GET /api/vms.
-func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
+// fetch performs GET /api/vms. withToken controls the Authorization header;
+// the token is only ever sent when the caller proved the monitor wants one.
+func (c *Client) fetch(ctx context.Context, withToken bool) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/vms", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "traefik-proxmenux-provider")
-	token, err := c.readToken()
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
+
+	if withToken {
+		token, err := c.readToken()
+		if err != nil {
+			return nil, err
+		}
+		if token == "" {
+			return nil, fmt.Errorf("token file %q is empty", c.tokenRef.TokenFile)
+		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
@@ -107,7 +136,12 @@ func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		// fallthrough to body read below
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, fmt.Errorf("%w (HTTP %d)", ErrAuthRequired, resp.StatusCode)
+	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("GET %s/api/vms: unexpected status %d: %s",
 			c.base, resp.StatusCode, strings.TrimSpace(string(body)))
@@ -120,7 +154,40 @@ func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
 	if int64(len(body)) > int64(c.tokenRef.MaxResponseBytes) {
 		return nil, fmt.Errorf("response exceeds max_response_bytes (%d)", c.tokenRef.MaxResponseBytes)
 	}
+	return body, nil
+}
 
+// Detect probes the monitor's authentication posture:
+//   - unauthenticated /api/vms returns 200     → AuthOpen
+//   - 401/403 and our configured token works   → AuthToken (then call SendToken)
+//   - 401/403 with no/invalid token            → error wrapping ErrAuthRequired
+func (c *Client) Detect(ctx context.Context) (AuthMode, error) {
+	if _, err := c.fetch(ctx, false); err == nil {
+		return AuthOpen, nil
+	} else if !errors.Is(err, ErrAuthRequired) {
+		return "", err // network / server problem — not an auth verdict
+	}
+
+	// Monitor demands authentication.
+	if c.tokenRef.TokenFile == "" {
+		return "", fmt.Errorf("%w: monitor has auth enabled and no token_file is configured", ErrAuthRequired)
+	}
+	if _, err := c.fetch(ctx, true); err != nil {
+		if errors.Is(err, ErrAuthRequired) {
+			return "", fmt.Errorf("%w: configured token was rejected by the monitor", ErrAuthRequired)
+		}
+		return "", err
+	}
+	return AuthToken, nil
+}
+
+// ListGuests fetches and decodes GET /api/vms. SendToken() must have been
+// called (after Detect) for credentials to be attached.
+func (c *Client) ListGuests(ctx context.Context) ([]Guest, error) {
+	body, err := c.fetch(ctx, c.sendToken)
+	if err != nil {
+		return nil, err
+	}
 	var guests []Guest
 	if err := json.Unmarshal(body, &guests); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)

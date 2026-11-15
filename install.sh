@@ -89,6 +89,16 @@ if [[ -z $API_URL ]]; then
 fi
 log "monitor API: $API_URL"
 
+# --- detect whether the monitor requires authentication (if-and-only-if) ----
+mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
+AUTH_MODE=open
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$API_URL/api/vms" || true)
+case $code in
+  200)     AUTH_MODE=open;  log "monitor API: no authentication required" ;;
+  401|403) AUTH_MODE=token; warn "monitor API requires authentication" ;;
+  *)       warn "monitor API not reachable from here (HTTP $code) — provider verifies at startup" ;;
+esac
+
 # --- domain (the one required answer) ---------------------------------------
 if [[ -z $DOMAIN ]]; then
   DOMAIN=$(ask "Base domain for app URLs (e.g. home.example.com)" "")
@@ -122,20 +132,21 @@ if [[ -f /etc/traefik/conf.d/zz-crowdsec.yml ]]; then
   ROUTING_BLOCK=$'routing:\n  middlewares:\n    - crowdsec@file'
 fi
 
-# --- optional API token ------------------------------------------------------
-mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
+# --- API token: only when the monitor requires it (if-and-only-if) ----------
 TOKEN_REF=""
 if [[ -n $TOKEN_FILE ]]; then
   [[ -r $TOKEN_FILE ]] || die "cannot read --token-file $TOKEN_FILE"
   install -m 600 "$TOKEN_FILE" "$CONFIG_DIR/token"
   TOKEN_REF='  token_file: /etc/traefik-proxmenux/token'
+  log "token installed from $TOKEN_FILE"
+elif [[ $AUTH_MODE == token ]]; then
+  secret=$(ask_secret "Monitor requires a token — paste ProxMenux API token")
+  [[ -n $secret ]] || die "monitor requires authentication; pass --token-file or provide a token"
+  umask 077; printf '%s' "$secret" > "$CONFIG_DIR/token"; umask 022
+  TOKEN_REF='  token_file: /etc/traefik-proxmenux/token'
+  log "token stored in $CONFIG_DIR/token (0600)"
 else
-  secret=$(ask_secret "ProxMenux API token (needed only if monitor auth is enabled)")
-  if [[ -n $secret ]]; then
-    umask 077; printf '%s' "$secret" > "$CONFIG_DIR/token"; umask 022
-    TOKEN_REF='  token_file: /etc/traefik-proxmenux/token'
-    log "token stored in $CONFIG_DIR/token (0600)"
-  fi
+  log "no token needed — monitor is auth-free (verified)"
 fi
 
 # --- write config (only what's non-default) ----------------------------------

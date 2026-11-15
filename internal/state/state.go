@@ -15,6 +15,7 @@ type Snapshot struct {
 	Source      string              `json:"source"`
 	TLSMode     string              `json:"tls_mode"`
 	Entrypoint  string              `json:"entrypoint"`
+	AuthMode    string              `json:"auth_mode"` // open | token | unknown
 	GeneratedAt time.Time           `json:"generated_at"`
 	NextSyncAt  time.Time           `json:"next_sync_at"`
 	SyncCount   uint64              `json:"sync_count"`

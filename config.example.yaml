@@ -12,9 +12,10 @@ provider:
 proxmenux:
   api_url: http://192.0.2.10:8008   # ProxMenux monitor API on the PVE host
   # token_file: /etc/traefik-proxmenux/token  # Bearer token, chmod 0600.
-  #   Strongly recommended: enable auth in ProxMenux and create a dedicated
-  #   token for this provider. Omit only while monitor auth is disabled
-  #   (LAN-open API) — the provider works either way.
+  #   If-and-only-if contract: the provider probes the monitor at startup.
+  #   It sends the token only when the monitor actually requires auth, and
+  #   it refuses to publish routes unauthenticated when auth is on. Set
+  #   this when ProxMenux monitor auth is enabled; leave unset when not.
   timeout: 10s                # per-request timeout
   max_response_bytes: 5242880 # response size cap (5 MiB)
   source: oci                 # which guests may become routes:

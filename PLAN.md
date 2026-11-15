@@ -101,9 +101,11 @@ allowlist (dashboard.via_traefik) — recommended.
 
 ## 5. Security model (requirements, not options)
 
-1. **Least privilege.** Read-only monitor API token, dedicated. Provider works
-   with auth disabled too (current pve-host state — flagged below), token is the
-   recommended posture. Document how to enable monitor auth + create token.
+1. **Least privilege + if-and-only-if auth.** Read-only monitor API token,
+   dedicated. At startup the provider probes the monitor: auth-free monitor
+   → no credentials ever sent; auth-required monitor → refuse to publish
+   until a valid token_file is configured (401/403 mapped to a hard stop,
+   never a silent unauthenticated poll).
 2. **No PVE API token.** No root, no guest-agent, no cluster audit. Blast
    radius = read-only app inventory of one LAN (names, IPs, catalog ports).
 3. **Secrets.** Never in YAML, logs, or CLI args. `token_file` (0600) read at

@@ -3,6 +3,7 @@ package proxmenux
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,11 +86,112 @@ func TestListGuestsSendsBearerToken(t *testing.T) {
 		p.APIURL = srv.URL
 		p.TokenFile = tokFile
 	}), slog.Default())
+	c.SendToken() // only after Detect proves the monitor requires a token
 	if _, err := c.ListGuests(context.Background()); err != nil {
 		t.Fatalf("ListGuests error: %v", err)
 	}
 	if gotAuth != "Bearer secret-token" {
 		t.Errorf("Authorization = %q, want Bearer secret-token", gotAuth)
+	}
+}
+
+func TestNoCredentialsInOpenMode(t *testing.T) {
+	// If-and-only-if: a configured token must NOT be sent while the monitor
+	// is auth-free (before SendToken is proven justified).
+	dir := t.TempDir()
+	tokFile := filepath.Join(dir, "token")
+	os.WriteFile(tokFile, []byte("secret-token"), 0o600)
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+
+	c := New(testCfg(func(p *config.ProxMenux) {
+		p.APIURL = srv.URL
+		p.TokenFile = tokFile
+	}), slog.Default())
+
+	mode, err := c.Detect(context.Background())
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if mode != AuthOpen {
+		t.Fatalf("mode = %q, want open", mode)
+	}
+	if _, err := c.ListGuests(context.Background()); err != nil {
+		t.Fatalf("ListGuests: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty (no credentials to an auth-free monitor)", gotAuth)
+	}
+}
+
+func TestDetectPaths(t *testing.T) {
+	t.Run("auth required, no token", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(401)
+		}))
+		defer srv.Close()
+		c := New(testCfg(func(p *config.ProxMenux) { p.APIURL = srv.URL }), slog.Default())
+		_, err := c.Detect(context.Background())
+		if !errors.Is(err, ErrAuthRequired) {
+			t.Fatalf("want ErrAuthRequired, got %v", err)
+		}
+	})
+
+	t.Run("auth required, token accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		tokFile := filepath.Join(dir, "token")
+		os.WriteFile(tokFile, []byte("good"), 0o600)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") == "Bearer good" {
+				w.Write([]byte("[]"))
+				return
+			}
+			w.WriteHeader(401)
+		}))
+		defer srv.Close()
+		c := New(testCfg(func(p *config.ProxMenux) {
+			p.APIURL = srv.URL
+			p.TokenFile = tokFile
+		}), slog.Default())
+		mode, err := c.Detect(context.Background())
+		if err != nil || mode != AuthToken {
+			t.Fatalf("mode = %q err = %v, want token", mode, err)
+		}
+	})
+
+	t.Run("auth required, token rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		tokFile := filepath.Join(dir, "token")
+		os.WriteFile(tokFile, []byte("bad"), 0o600)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(403)
+		}))
+		defer srv.Close()
+		c := New(testCfg(func(p *config.ProxMenux) {
+			p.APIURL = srv.URL
+			p.TokenFile = tokFile
+		}), slog.Default())
+		_, err := c.Detect(context.Background())
+		if !errors.Is(err, ErrAuthRequired) || !strings.Contains(err.Error(), "rejected") {
+			t.Fatalf("want rejected-token ErrAuthRequired, got %v", err)
+		}
+	})
+}
+
+func TestListGuests401MappedToErrAuthRequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+	}))
+	defer srv.Close()
+	c := New(testCfg(func(p *config.ProxMenux) { p.APIURL = srv.URL }), slog.Default())
+	_, err := c.ListGuests(context.Background())
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("want ErrAuthRequired, got %v", err)
 	}
 }
 

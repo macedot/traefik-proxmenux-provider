@@ -40,6 +40,7 @@
     <span>tls <b id="tls">—</b></span>
     <span>source <b id="source">—</b></span>
     <span>entrypoint <b id="entrypoint">—</b></span>
+    <span>monitor auth <b id="auth">—</b></span>
     <span>last sync <b id="last">—</b></span>
     <span>next sync <b id="next">—</b></span>
   </div>
@@ -67,6 +68,7 @@ async function refresh() {
     document.getElementById("tls").textContent = s.tls_mode || "—";
     document.getElementById("source").textContent = s.source || "—";
     document.getElementById("entrypoint").textContent = s.entrypoint || "—";
+    document.getElementById("auth").textContent = s.auth_mode || "—";
     document.getElementById("last").textContent = fmtTime(s.generated_at);
     document.getElementById("next").textContent = fmtTime(s.next_sync_at);
     document.getElementById("c-exposed").textContent = (s.routes || []).length;

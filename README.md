@@ -75,8 +75,11 @@ host by ProxDnx.
 
 ## Security model
 
-1. **Least privilege** — read-only monitor API token, dedicated. The provider
-   also works with auth disabled (not recommended).
+1. **Least privilege + if-and-only-if auth** — the provider probes the
+   monitor at startup: it works without authentication **if and only if**
+   ProxMenux itself is auth-free; the moment the monitor requires auth, it
+   refuses to publish routes until a valid `token_file` is configured (and
+   it never sends credentials to an auth-free monitor).
 2. **No PVE API token** — no root, no guest agent, no cluster audit.
    Compromise = read-only app names/IPs/ports of one LAN.
 3. **Secrets** — never in YAML, logs, or CLI args; `token_file` (0600) read at
