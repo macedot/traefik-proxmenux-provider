@@ -60,7 +60,9 @@ func main() {
 	holder := state.New(version)
 	client := proxmenux.New(cfg.ProxMenux, logger)
 	store := overrides.Open(cfg.ProxMenux.OverridesPath)
-	resolveLAN(cfg)
+	if err := resolveLAN(cfg); err != nil {
+		logger.Warn("could not auto-detect LAN subnet; add proxmenux.lan_cidr to config", "err", err)
+	}
 	resyncC := make(chan struct{}, 1)
 
 	// Auth contract: detect the monitor's posture once, re-detect on auth
@@ -207,14 +209,16 @@ func main() {
 // resolveLAN fills ProxMenux.LANResolved: the explicit lan_cidr when set,
 // otherwise the provider's own /24 (guests usually report their VPN IP
 // first — target IPs must be picked from the reachable subnet).
-func resolveLAN(cfg *config.Config) {
+// NOTE: interface enumeration needs AF_NETLINK — keep it in the unit's
+// RestrictAddressFamilies or this silently degrades.
+func resolveLAN(cfg *config.Config) error {
 	if v := strings.TrimSpace(cfg.ProxMenux.LANCIDR); v != "" {
 		cfg.ProxMenux.LANResolved = v
-		return
+		return nil
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return
+		return err
 	}
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -234,9 +238,10 @@ func resolveLAN(cfg *config.Config) {
 				continue
 			}
 			cfg.ProxMenux.LANResolved = ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
-			return
+			return nil
 		}
 	}
+	return fmt.Errorf("no non-loopback IPv4 interface found")
 }
 
 func runDiscovery() {

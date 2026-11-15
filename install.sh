@@ -191,7 +191,7 @@ ProtectSystem=strict
 ReadWritePaths=/etc/traefik/conf.d /etc/traefik-proxmenux
 ProtectHome=true
 PrivateTmp=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 MemoryDenyWriteExecute=true
 CapabilityBoundingSet=
 
