@@ -187,3 +187,40 @@ func TestSlugEditValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestEnabledEndpoint(t *testing.T) {
+	h := state.New("t")
+	store := overrides.Open(filepath.Join(t.TempDir(), "overrides.json"))
+	resync := make(chan struct{}, 1)
+	srv := httptest.NewServer(NewMux(h, Options{Edit: true, Store: store, Resync: resync}))
+	defer srv.Close()
+	cli := srv.Client()
+
+	resp, err := cli.Post(srv.URL+"/api/enabled", "application/json",
+		strings.NewReader(`{"vmid":100,"disabled":true}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	f, _ := store.Load()
+	if !f.Disabled["100"] {
+		t.Fatalf("disabled flag not persisted: %+v", f)
+	}
+	select {
+	case <-resync:
+	default:
+		t.Error("resync not signalled")
+	}
+
+	// Re-enable removes the key.
+	resp2, _ := cli.Post(srv.URL+"/api/enabled", "application/json",
+		strings.NewReader(`{"vmid":100,"disabled":false}`))
+	resp2.Body.Close()
+	f2, _ := store.Load()
+	if len(f2.Disabled) != 0 {
+		t.Fatalf("disabled not cleared: %+v", f2.Disabled)
+	}
+}

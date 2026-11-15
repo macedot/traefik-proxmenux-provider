@@ -35,6 +35,7 @@ type Route struct {
 	WebPath    string `json:"web_path"`
 	HealthPath string `json:"health_path"`
 	Stale      bool   `json:"stale"`    // TCP probe failed: shown, not served
+	Disabled   bool   `json:"disabled"` // toggled off on the dashboard: shown, not served
 	Insecure   bool   `json:"insecure"` // https backend with self-signed cert (PVE UI)
 	Served     bool   `json:"served"`   // published to the generated Traefik config
 }
@@ -95,8 +96,9 @@ func ReservedHostnames(cfg *config.Config) map[string]bool {
 }
 
 // Transform filters guests and service ports into routes (ProxDnx
-// semantics). Stale routes are flagged, never silently dropped.
-func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, cfg *config.Config) *Result {
+// semantics). Stale and disabled routes are flagged (visible on the
+// dashboard), never silently dropped. disabled is keyed by vmid string.
+func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled map[string]bool, cfg *config.Config) *Result {
 	res := &Result{}
 	reserved := ReservedHostnames(cfg)
 
@@ -174,7 +176,7 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, cfg *conf
 				continue
 			}
 
-			candidates = append(candidates, candidate{route: Route{
+			route := Route{
 				Slug:      hostname,
 				Hostname:  hostname + "." + cfg.Domain.Base,
 				AppName:   sp.Name,
@@ -186,8 +188,18 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, cfg *conf
 				Port:      sp.Port,
 				WebPath:   sp.WebPath,
 				Target:    fmt.Sprintf("%s://%s:%d", sp.Scheme, gip, sp.Port),
-			}})
+			}
 			seenIPPort[gip+":"+strconv.Itoa(sp.Port)] = true
+
+			// Per-app on/off toggle: card stays visible, route not served.
+			if disabled[strconv.Itoa(g.VMID)] {
+				route.Disabled = true
+				route.Served = false
+				res.Routes = append(res.Routes, route)
+				continue
+			}
+
+			candidates = append(candidates, candidate{route: route})
 		}
 	}
 

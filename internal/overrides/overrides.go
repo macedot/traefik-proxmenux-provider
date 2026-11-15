@@ -12,6 +12,7 @@ import (
 
 type File struct {
 	SlugOverrides map[string]string `json:"slug_overrides"`
+	Disabled      map[string]bool   `json:"disabled"` // vmid -> app toggle off
 }
 
 type Store struct {
@@ -34,17 +35,36 @@ func (s *Store) loadLocked() (File, error) {
 	b, err := os.ReadFile(s.path) // #nosec G304 -- admin-controlled config path
 	if err != nil {
 		if os.IsNotExist(err) {
-			return File{SlugOverrides: map[string]string{}}, nil
+			return File{SlugOverrides: map[string]string{}, Disabled: map[string]bool{}}, nil
 		}
 		return f, err
 	}
 	if err := json.Unmarshal(b, &f); err != nil {
-		return File{SlugOverrides: map[string]string{}}, fmt.Errorf("parse overrides: %w", err)
+		return File{SlugOverrides: map[string]string{}, Disabled: map[string]bool{}}, fmt.Errorf("parse overrides: %w", err)
 	}
 	if f.SlugOverrides == nil {
 		f.SlugOverrides = map[string]string{}
 	}
+	if f.Disabled == nil {
+		f.Disabled = map[string]bool{}
+	}
 	return f, nil
+}
+
+// SetDisabled toggles an app on/off by vmid. disabled=false removes the key.
+func (s *Store) SetDisabled(vmid string, disabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	if disabled {
+		f.Disabled[vmid] = true
+	} else {
+		delete(f.Disabled, vmid)
+	}
+	return s.saveLocked(f)
 }
 
 // SetSlug stores a slug override for a vmid (already validated by the caller).

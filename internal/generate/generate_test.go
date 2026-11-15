@@ -25,14 +25,15 @@ func routes() []transform.Route {
 	return []transform.Route{
 		{
 			Slug: "adguard-home", Hostname: "adguard-home.home.example.com",
-			AppName: "AdGuard Home", VMID: 100, GuestName: "adguard", IP: "192.0.2.2",
+			AppName: "AdGuard Home", Kind: "app", VMID: 100, GuestName: "adguard", IP: "192.0.2.2",
 			Target: "http://192.0.2.2:3000", Scheme: "http", Port: 3000, WebPath: "/",
+			Served: true,
 		},
 		{
 			Slug: "jellyseerr", Hostname: "jellyseerr.home.example.com",
-			AppName: "Jellyseerr", VMID: 115, GuestName: "byparr", IP: "192.0.2.192",
+			AppName: "Jellyseerr", Kind: "app", VMID: 115, GuestName: "byparr", IP: "192.0.2.192",
 			Target: "https://192.0.2.192:5055", Scheme: "https", Port: 5055, WebPath: "/",
-			HealthPath: "/health",
+			HealthPath: "/health", Served: true,
 		},
 	}
 }
@@ -170,6 +171,35 @@ func TestRenderGlobalMiddlewares(t *testing.T) {
 	r := m["http"].(map[string]any)["routers"].(map[string]any)["pmp-adguard-home"].(map[string]any)
 	if r["middlewares"].([]any)[0] != "secure-headers@file" {
 		t.Errorf("middlewares = %v", r["middlewares"])
+	}
+}
+
+func TestRenderSkipsUnserved(t *testing.T) {
+	c := cfg(t, "")
+	rs := routes()
+	stale := rs[0]
+	stale.Stale = true
+	stale.Served = false
+	out, err := Render([]transform.Route{stale, rs[1]}, c)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	m := parseYAML(t, out)
+	routers := m["http"].(map[string]any)["routers"].(map[string]any)
+	if _, ok := routers["pmp-adguard-home"]; ok {
+		t.Error("stale route must not be rendered")
+	}
+	if _, ok := routers["pmp-jellyseerr"]; !ok {
+		t.Error("served route missing")
+	}
+
+	disabled := rs[0]
+	disabled.Disabled = true
+	disabled.Served = false
+	out2, _ := Render([]transform.Route{disabled}, c)
+	m2 := parseYAML(t, out2)
+	if _, ok := m2["http"].(map[string]any)["routers"]; ok {
+		t.Error("disabled route must not be rendered")
 	}
 }
 

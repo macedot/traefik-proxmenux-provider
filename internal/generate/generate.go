@@ -128,8 +128,8 @@ func Render(routes []transform.Route, cfg *config.Config) ([]byte, error) {
 	ep := cfg.Routing.Entrypoint
 
 	for _, r := range routes {
-		if r.Stale {
-			continue // tagged, visible on the dashboard, never served
+		if !r.Served {
+			continue // stale/disabled: tagged, visible on the dashboard, never served
 		}
 		svcName := "pmp-" + r.Slug
 		svc := &dynServiceFallback{LoadBalancer: &dynLB{

@@ -147,6 +147,7 @@ func main() {
 		dwg.Wait()
 
 		// Dashboard edits (overrides file) win over config slug_overrides.
+		disabled := map[string]bool{}
 		if ov, oerr := store.Load(); oerr != nil {
 			logger.Warn("overrides load failed", "err", oerr)
 		} else {
@@ -158,8 +159,13 @@ func main() {
 				merged[k] = v
 			}
 			cfg.Domain.SlugOverrides = merged
+			for k, v := range ov.Disabled {
+				if v {
+					disabled[k] = true
+				}
+			}
 		}
-		result := transform.Transform(guests, extras, cfg)
+		result := transform.Transform(guests, extras, disabled, cfg)
 
 		// Static infra entries (ProxDnx parity): <host> (PVE UI) and the
 		// ProxMenux UI names, derived from the monitor hostname + api host.

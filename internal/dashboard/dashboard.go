@@ -113,6 +113,41 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 			writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "cleared": existed})
 		}
 	})
+	mux.HandleFunc("/api/enabled", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON := func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+			return
+		}
+		if !o.Edit || o.Store == nil {
+			writeJSON(http.StatusForbidden, map[string]string{"error": "editing is disabled (dashboard.edit: false)"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "read body"})
+			return
+		}
+		var req struct {
+			VMID     int  `json:"vmid"`
+			Disabled bool `json:"disabled"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || req.VMID <= 0 {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid required"})
+			return
+		}
+		if err := o.Store.SetDisabled(strconv.Itoa(req.VMID), req.Disabled); err != nil {
+			writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		signalResync(o)
+		writeJSON(http.StatusOK, map[string]any{"ok": true, "vmid": req.VMID, "disabled": req.Disabled})
+	})
 	return mux
 }
 
