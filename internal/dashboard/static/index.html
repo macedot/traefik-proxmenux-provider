@@ -18,6 +18,8 @@
   #staticgrid,.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
   main{padding:0 0 26px} /* sections carry their own horizontal padding */
   .dsec{padding:0 32px 26px}
+  .cardtop{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+  .cardtop .ebtn.tgl{flex:none;font-size:14px}
   .dhead{margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
   .dhead{cursor:pointer;-webkit-user-select:none;user-select:none}
   .dhead .fold{display:inline-block;width:1.1em}
@@ -215,30 +217,38 @@ async function load(){
       const link=document.createElement("a");link.className="domain";link.href="https://"+x.hostname+"/";
       link.textContent=x.hostname;
       link.target="_blank";link.rel="noopener noreferrer";
-      c.appendChild(link);
+      // the on/off dot lives on the first line, left of the URL
+      const top=document.createElement("div");top.className="cardtop";
+      let tgl=null;
+      if(s.edit_enabled){
+        tgl=document.createElement("button");tgl.className="ebtn tgl";
+        tgl.title="route status / toggle";
+      }
+      if(tgl)top.appendChild(tgl);
+      top.appendChild(link);
+      c.appendChild(top);
       const svc=document.createElement("div");svc.className="svc";svc.textContent=x.app_name;
       c.appendChild(svc);
       if(flags){const fl=document.createElement("div");fl.className="chips";fl.innerHTML=flags;c.appendChild(fl)}
       const ch=document.createElement("div");ch.className="chips";
       ch.innerHTML='<span class="chip">🖥 <b>'+esc(x.guest_name)+'</b></span>'
         +'<a class="chip iplink" href="'+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(x.scheme||"http")+'://'+esc(x.ip)+':'+esc(x.port)+' directly"><b>'+esc(x.ip)+'</b>:'+esc(x.port)+'</a>';
-      if(s.edit_enabled){
-        const t=document.createElement("button");t.className="ebtn tgl";
+      if(tgl){
         // status dot: 🟢 serving · 🟠 applying · 🔴 stopped
         const setDot=()=>{
-          t.textContent=x.disabled?"🔴":(x.stale?"🟠":"🟢");
-          t.title=x.disabled?"stopped — click to start":"serving — click to stop";
+          tgl.textContent=x.disabled?"🔴":(x.stale?"🟠":"🟢");
+          tgl.title=x.disabled?"stopped — click to start":"serving — click to stop";
         };
         setDot();
-        t.onclick=async()=>{
-          if(t.disabled)return;
+        tgl.onclick=async()=>{
+          if(tgl.disabled)return;
           const want=!x.disabled;
           const key="v"+x.vmid;
           inflight.add(key);refreshDomainDot(x.domain);
-          t.disabled=true;t.textContent="🟠";t.title="applying…";
+          tgl.disabled=true;tgl.textContent="🟠";tgl.title="applying…";
           const r=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
             body:JSON.stringify({vmid:x.vmid,disabled:!x.disabled})});
-          if(!r.ok){const j=await r.json().catch(()=>({}));t.disabled=false;t.textContent=j.error||"error";
+          if(!r.ok){const j=await r.json().catch(()=>({}));tgl.disabled=false;tgl.textContent=j.error||"error";
             inflight.delete(key);refreshDomainDot(x.domain);return}
           await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.served===want});
           // patch this card in place instead of reloading the whole page
@@ -252,7 +262,6 @@ async function load(){
           }catch(e){load()}
           inflight.delete(key);refreshDomainDot(x.domain);
         };
-        ch.appendChild(t);
       }
       c.appendChild(ch);
       if(s.edit_enabled&&!x.stale){
@@ -329,10 +338,10 @@ async function load(){
     infra.forEach(r=>{
       const c=document.createElement("div");c.className="card"+(r.disabled?" dim":"");
       const chip=r.disabled?'<span class="chip warn">⏸ disabled</span>':"";
-      c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="https://'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
+      c.innerHTML='<div class="cardtop">'+(s.edit_enabled?'<button class="ebtn tgl" title="route status / toggle"></button>':"")
+        +'<a class="domain" target="_blank" rel="noopener noreferrer" href="https://'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a></div>'
         +'<div class="svc">'+esc(r.app_name)+'</div>'
         +'<div class="chips"><span class="chip">🖥 <b>'+esc(r.guest_name)+'</b></span><a class="chip iplink" href="'+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+'/" target="_blank" rel="noopener noreferrer" title="open '+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+' directly"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</a>'+chip
-        +(s.edit_enabled?'<button class="ebtn tgl" title="route status / toggle"></button>':"")
         +'</div>';
       const b=c.querySelector(".ebtn.tgl");
       if(b){
@@ -406,11 +415,12 @@ async function load(){
       const c=document.createElement("div");c.className="card"+((r.stale||r.disabled)?" dim":"");
       const flags=(r.stale?'<span class="chip bad">⚠ stale — '+esc(r.stale_reason||"unreachable")+'</span>':'')
         +(r.disabled?'<span class="chip warn">⏸ disabled</span>':'');
-      c.innerHTML='<a class="domain" target="_blank" rel="noopener noreferrer" href="https://'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a>'
+      c.innerHTML='<div class="cardtop">'+(s.edit_enabled?'<button class="ebtn tgl" title="route status / toggle"></button>':"")
+        +'<a class="domain" target="_blank" rel="noopener noreferrer" href="https://'+esc(r.hostname)+'/">'+esc(r.hostname)+'</a></div>'
         +'<div class="svc">'+esc(r.app_name)+'</div>'
         +'<div class="chips">'+flags
         +'<a class="chip iplink" href="'+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+'/\" target="_blank" rel="noopener noreferrer" title="open '+esc(r.scheme||"http")+'://'+esc(r.ip)+':'+esc(r.port)+' directly"><b>'+esc(r.ip)+'</b>:'+esc(r.port)+'</a>'
-        +(s.edit_enabled?'<button class="ebtn tgl" title="route status / toggle"></button><button class="ebtn del" title="remove this custom entry">✕</button>':"")
+        +(s.edit_enabled?'<button class="ebtn del" title="remove this custom entry">✕</button>':"")
         +'</div>';
       const b=c.querySelector(".ebtn.tgl");
       if(b){
