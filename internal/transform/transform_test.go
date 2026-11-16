@@ -529,3 +529,54 @@ func TestProbeRouteStaleReason(t *testing.T) {
 		t.Fatalf("healthy must clear reason: %+v", r3)
 	}
 }
+
+func TestNoIPAvailable(t *testing.T) {
+	port, stop := openPort(t)
+	defer stop()
+
+	cfg := base()
+	cfg.ProxMenux.LANResolved = "192.0.2.0/24"
+	// byparr-style guest: its only address lives on a VPN/isolated network
+	g := guest(115, "byparr", "lxc", "198.51.100.39", "running", watch("Byparr", port))
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
+	if len(res.Routes) != 1 {
+		t.Fatalf("routes = %d (%+v), want 1", len(res.Routes), res.Skipped)
+	}
+	r := res.Routes[0]
+	if !r.Stale || r.StaleReason != "no ip available" || r.Served {
+		t.Fatalf("stale=%v reason=%q served=%v", r.Stale, r.StaleReason, r.Served)
+	}
+	if r.IP != "198.51.100.39" {
+		t.Errorf("informational ip = %q, want the guest's reported address", r.IP)
+	}
+}
+
+func TestPickIPStates(t *testing.T) {
+	cfg := base()
+	cfg.ProxMenux.LANResolved = "192.0.2.0/24"
+
+	// IPs exist but none on the host network → no pick
+	g := guest(1, "g", "lxc", "198.51.100.39", "running")
+	ip, first, onNet := pickIP(g, cfg)
+	if ip != "" || first != "198.51.100.39" || onNet {
+		t.Fatalf("off-subnet pick = %q/%q/%v", ip, first, onNet)
+	}
+
+	// LAN candidate wins
+	g.IPs = []string{"192.0.2.5", "198.51.100.39"}
+	if ip, _, onNet = pickIP(g, cfg); ip != "192.0.2.5" || !onNet {
+		t.Fatalf("subnet pick = %q/%v", ip, onNet)
+	}
+
+	// no addresses at all
+	g.IP, g.IPs = "", nil
+	if ip, first, onNet = pickIP(g, cfg); ip != "" || first != "" || onNet {
+		t.Fatalf("empty guest = %q/%q/%v", ip, first, onNet)
+	}
+
+	// no resolved network → ProxDnx first-usable fallback
+	g2 := guest(2, "g2", "lxc", "198.51.100.7", "running")
+	if ip, _, onNet = pickIP(g2, base()); ip != "198.51.100.7" || !onNet {
+		t.Fatalf("fallback = %q/%v", ip, onNet)
+	}
+}

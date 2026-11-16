@@ -134,8 +134,12 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 		if g.Type != "" && g.Type != "lxc" {
 			continue
 		}
-		gip := pickIP(g, cfg)
-		if gip == "" {
+		gip, firstCand, onNet := pickIP(g, cfg)
+		if gip == "" && firstCand == "" {
+			// guest reported no IPv4 at all
+			for _, w := range g.AppWatches {
+				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: w.Name, Reason: "no usable ip"})
+			}
 			continue
 		}
 
@@ -152,8 +156,13 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				res.Skipped = append(res.Skipped, Skipped{VMID: g.VMID, GuestName: g.Name, AppName: sp.Name, Reason: reason})
 			}
 
-			// ProxDnx parity: one record per unique ip:port.
-			if seenIPPort[gip+":"+strconv.Itoa(sp.Port)] {
+			// ProxDnx parity: one record per unique ip:port. Guests with
+			// no usable IP dedupe by their informational address instead.
+			ipKey := gip
+			if ipKey == "" {
+				ipKey = firstCand
+			}
+			if seenIPPort[ipKey+":"+strconv.Itoa(sp.Port)] {
 				continue
 			}
 
@@ -194,6 +203,10 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				continue
 			}
 
+			displayIP := gip
+			if displayIP == "" {
+				displayIP = firstCand // informational: guest's only reported address
+			}
 			route := Route{
 				Slug:      hostname,
 				Hostname:  full,
@@ -202,13 +215,13 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				Kind:      "app",
 				VMID:      g.VMID,
 				GuestName: g.Name,
-				IP:        gip,
+				IP:        displayIP,
 				Scheme:    sp.Scheme,
 				Port:      sp.Port,
 				WebPath:   sp.WebPath,
-				Target:    fmt.Sprintf("%s://%s:%d", sp.Scheme, gip, sp.Port),
+				Target:    fmt.Sprintf("%s://%s:%d", sp.Scheme, displayIP, sp.Port),
 			}
-			seenIPPort[gip+":"+strconv.Itoa(sp.Port)] = true
+			seenIPPort[ipKey+":"+strconv.Itoa(sp.Port)] = true
 
 			// Per-app on/off toggle: card stays visible, route not served.
 			// Explicit per-app state wins; absent key = config default
@@ -230,6 +243,15 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				route.Served = false
 				res.Routes = append(res.Routes, route)
 				continue // not probed: domain is off, re-probed on re-enable
+			}
+			if !onNet {
+				// guest has addresses but none on the host network (VPN
+				// sidecar, isolated bridge): visible but not routable
+				route.Stale = true
+				route.StaleReason = "no ip available"
+				route.Served = false
+				res.Routes = append(res.Routes, route)
+				continue
 			}
 
 			candidates = append(candidates, candidate{route: route})
@@ -491,7 +513,37 @@ func sanePath(p string) bool {
 
 // pickIP mirrors ProxDnx: IPv4 from ips[] (plus ip), subnet-preferred, then
 // the first IPv4 that is not loopback / CGNAT / docker / link-local.
-func pickIP(g proxmenux.Guest, cfg *config.Config) string {
+// When a host network is resolved and no candidate is inside it, the guest
+// only has addresses on other networks (VPN sidecars, isolated bridges):
+// onNet=false with ip="" → routes render stale as "no ip available"
+// instead of dead first-usable picks. first is the guest's primary IPv4
+// (informational when the pick fails).
+func pickIP(g proxmenux.Guest, cfg *config.Config) (ip, first string, onNet bool) {
+	v4 := guestV4(g)
+	if len(v4) == 0 {
+		return "", "", false
+	}
+	first = v4[0]
+	if cidr := strings.TrimSpace(cfg.ProxMenux.LANResolved); cidr != "" {
+		if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
+			for _, c := range v4 {
+				if ip := net.ParseIP(c); ip != nil && ipnet.Contains(ip) {
+					return c, first, true
+				}
+			}
+			return "", first, false // has IPs, none on the host network
+		}
+	}
+	for _, c := range v4 {
+		if !excludedIP(c) {
+			return c, first, true
+		}
+	}
+	return "", first, false
+}
+
+// guestV4 returns the guest's deduplicated global IPv4 candidates.
+func guestV4(g proxmenux.Guest) []string {
 	seen := map[string]bool{}
 	var v4 []string
 	for _, c := range append([]string{g.IP}, g.IPs...) {
@@ -502,24 +554,7 @@ func pickIP(g proxmenux.Guest, cfg *config.Config) string {
 		seen[c] = true
 		v4 = append(v4, c)
 	}
-	if len(v4) == 0 {
-		return ""
-	}
-	if cidr := strings.TrimSpace(cfg.ProxMenux.LANResolved); cidr != "" {
-		if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
-			for _, c := range v4 {
-				if ip := net.ParseIP(c); ip != nil && ipnet.Contains(ip) {
-					return c
-				}
-			}
-		}
-	}
-	for _, c := range v4 {
-		if !excludedIP(c) {
-			return c
-		}
-	}
-	return ""
+	return v4
 }
 
 var fallbackExclude = []*net.IPNet{

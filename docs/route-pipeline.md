@@ -50,6 +50,11 @@ network (probing happens inside it, but is read-only).
    inside the guest, the default gateway of that bridge is the host's
    address on the adapter — ProxDnx `resolveSubnet` parity) → the PVE
    host's /24 from the monitor API address → the provider CT's own /24.
+   A guest whose addresses all live on other networks (VPN sidecars on a
+   gluetun bridge, isolated `vmbr10` guests) gets no pick: its routes
+   render visible but **stale with reason `no ip available`** — never a
+   dead first-usable fallback target. Guests with no IPv4 at all are
+   skipped with reason `no usable ip`.
 3. Otherwise the first candidate that is not loopback / not
    CGNAT / docker / link-local (`excludedIP`).
 
