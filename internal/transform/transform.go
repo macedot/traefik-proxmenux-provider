@@ -7,6 +7,7 @@
 package transform
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -24,24 +25,25 @@ import (
 
 // Route is one app/infra route.
 type Route struct {
-	Key        string `json:"key,omitempty"` // override key; infra uses "infra:<slug>"
-	Slug       string `json:"slug"`
-	Hostname   string `json:"hostname"`
-	Domain     string `json:"domain"` // the domain part of the URL (per-app pick)
-	AppName    string `json:"app_name"`
-	Kind       string `json:"kind"` // app | infra
-	VMID       int    `json:"vmid"`
-	GuestName  string `json:"guest_name"`
-	IP         string `json:"ip"`
-	Target     string `json:"target"`
-	Scheme     string `json:"scheme"`
-	Port       int    `json:"port"`
-	WebPath    string `json:"web_path"`
-	HealthPath string `json:"health_path"`
-	Stale      bool   `json:"stale"`    // TCP probe failed: shown, not served
-	Disabled   bool   `json:"disabled"` // toggled off on the dashboard: shown, not served
-	Insecure   bool   `json:"insecure"` // https backend with self-signed cert (PVE UI)
-	Served     bool   `json:"served"`   // published to the generated Traefik config
+	Key         string `json:"key,omitempty"` // override key; infra uses "infra:<slug>"
+	Slug        string `json:"slug"`
+	Hostname    string `json:"hostname"`
+	Domain      string `json:"domain"` // the domain part of the URL (per-app pick)
+	AppName     string `json:"app_name"`
+	Kind        string `json:"kind"` // app | infra
+	VMID        int    `json:"vmid"`
+	GuestName   string `json:"guest_name"`
+	IP          string `json:"ip"`
+	Target      string `json:"target"`
+	Scheme      string `json:"scheme"`
+	Port        int    `json:"port"`
+	WebPath     string `json:"web_path"`
+	HealthPath  string `json:"health_path"`
+	Stale       bool   `json:"stale"`                  // probe failed: shown, not served
+	StaleReason string `json:"stale_reason,omitempty"` // why the probe failed (port closed, unreachable, timed out…)
+	Disabled    bool   `json:"disabled"`               // toggled off on the dashboard: shown, not served
+	Insecure    bool   `json:"insecure"`               // https backend with self-signed cert (PVE UI)
+	Served      bool   `json:"served"`                 // published to the generated Traefik config
 }
 
 // Skipped records why a port/watch was not turned into a route.
@@ -374,6 +376,34 @@ func ApplyToggle(routes []Route, disabled map[string]bool, domainOff map[string]
 	}
 }
 
+// probeFailReason turns a dial/TLS error into a short human reason for the
+// dashboard chip.
+func probeFailReason(err error) string {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		msg := strings.ToLower(opErr.Err.Error())
+		switch {
+		case strings.Contains(msg, "refused"):
+			return "port closed"
+		case strings.Contains(msg, "no route"), strings.Contains(msg, "unreachable"):
+			return "unreachable"
+		case strings.Contains(msg, "tls"), strings.Contains(msg, "certificate"):
+			return "tls handshake failed"
+		case opErr.Timeout() || strings.Contains(msg, "timeout") || strings.Contains(msg, "timed out"):
+			return "timed out"
+		}
+		return strings.TrimPrefix(strings.ToLower(opErr.Err.Error()), "connect: ")
+	}
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return "certificate not trusted"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timed out"
+	}
+	return "unreachable"
+}
+
 // ProbeRoute probes a route target. http targets get a TCP dial; https
 // targets get a real TLS handshake with certificate verification. An
 // https target whose certificate cannot be verified for the dial address
@@ -387,12 +417,14 @@ func ProbeRoute(r *Route, timeout time.Duration) {
 		conn, err := dialer.Dial("tcp", addr)
 		if err != nil {
 			r.Stale = true
+			r.StaleReason = probeFailReason(err)
 			r.Served = false
 			return
 		}
 		_ = conn.Close()
 		r.Stale = false
 		r.Insecure = false
+		r.StaleReason = ""
 		r.Served = true
 		return
 	}
@@ -406,16 +438,19 @@ func ProbeRoute(r *Route, timeout time.Duration) {
 			// address (self-signed, unknown CA, no IP SAN)
 			r.Insecure = true
 			r.Stale = false
+			r.StaleReason = ""
 			r.Served = true
 			return
 		}
 		r.Stale = true
+		r.StaleReason = probeFailReason(err)
 		r.Served = false
 		return
 	}
 	_ = conn.Close()
 	r.Stale = false
 	r.Insecure = false
+	r.StaleReason = ""
 	r.Served = true
 }
 

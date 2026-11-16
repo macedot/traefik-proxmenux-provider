@@ -502,3 +502,30 @@ func TestApplyInfraEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeRouteStaleReason(t *testing.T) {
+	// closed port → connection refused → "port closed"
+	r := Route{Slug: "x", Scheme: "http", IP: "127.0.0.1", Port: 1}
+	ProbeRoute(&r, time.Second)
+	if !r.Stale || r.StaleReason != "port closed" {
+		t.Fatalf("closed port: stale=%v reason=%q", r.Stale, r.StaleReason)
+	}
+
+	// unroutable address → timeout → "timed out"
+	r2 := Route{Slug: "y", Scheme: "http", IP: "192.0.2.99", Port: 8191}
+	ProbeRoute(&r2, 300*time.Millisecond)
+	if !r2.Stale || r2.StaleReason != "timed out" {
+		t.Fatalf("unroutable: stale=%v reason=%q", r2.Stale, r2.StaleReason)
+	}
+
+	// healthy http clears the reason
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer plain.Close()
+	h, p, _ := net.SplitHostPort(strings.TrimPrefix(plain.URL, "http://"))
+	pn, _ := strconv.Atoi(p)
+	r3 := Route{Slug: "z", Scheme: "http", IP: h, Port: pn}
+	ProbeRoute(&r3, time.Second)
+	if r3.Stale || r3.StaleReason != "" {
+		t.Fatalf("healthy must clear reason: %+v", r3)
+	}
+}

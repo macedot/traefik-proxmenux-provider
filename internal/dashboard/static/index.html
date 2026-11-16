@@ -198,7 +198,7 @@ async function load(){
     const apps=(s.routes||[]).filter(r=>r.kind==="app");
     const makeCard=(x)=>{
       const c=document.createElement("div");c.className="card"+((x.stale||x.disabled)?" dim":"");
-      const flags=(x.stale?'<span class="chip bad">⚠ stale — port closed</span>':'')
+      const flags=(x.stale?'<span class="chip bad">⚠ stale — '+esc(x.stale_reason||"unreachable")+'</span>':'')
         +(x.disabled?'<span class="chip warn">⏸ disabled</span>':'');
       const link=document.createElement("a");link.className="domain";link.href=proto()+"//"+x.hostname+"/";
       link.textContent=x.hostname;
