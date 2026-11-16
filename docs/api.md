@@ -62,6 +62,12 @@ grayed instead of pretending they vanished.
 infrastructure entries (the key is the stable `infra:<default-slug>`
 identity; a rename does not change it).
 
+Apps carry an optional `port`, making the override identity `vmid:port` —
+one box can host several web UIs (different ports), each with its own slug,
+domain pick and on/off state (`/api/enabled` accepts the same `port`).
+A plain `vmid` (legacy) still applies to every port on the box; resetting a
+`vmid:port` ident also clears any legacy whole-box override.
+
 - `slug` is slugified server-side; must contain at least one alphanumeric
 - `domain` optional; must be in the configured domain list; empty resets
   the pick to the default
