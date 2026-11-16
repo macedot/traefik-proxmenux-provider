@@ -206,6 +206,19 @@ func main() {
 			}
 		}
 
+		// Manually defined entries (dashboard + button): probed and
+		// toggled like discovered apps, rendered in the CUSTOM section.
+		if entries := store.ListCustom(); len(entries) > 0 {
+			custom := transform.BuildCustomRoutes(entries, cfg)
+			if cfg.Routing.Probe {
+				for i := range custom {
+					transform.ProbeRoute(&custom[i], cfg.Routing.ProbeTimeout.Std())
+				}
+			}
+			transform.ApplyToggle(custom, disabled, domainOff, false, cfg)
+			result.Routes = append(result.Routes, custom...)
+		}
+
 		doc, err := generate.Render(result.Routes, cfg)
 		if err != nil {
 			snap.LastError = err.Error()

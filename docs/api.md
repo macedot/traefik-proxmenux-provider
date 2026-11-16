@@ -121,3 +121,29 @@ atomic temp+fsync+rename, nil-map repair on load):
 
 Merged over `config.yaml` on every sync: dashboard edits always win; the
 config file is never written to.
+
+## POST /api/custom
+
+Create a manually defined entry (dashboard `＋ add` button). Requires
+`dashboard.edit: true`. Body:
+
+```json
+{"name": "My NAS", "ip": "192.0.2.10", "port": 5000, "scheme": "http", "domain": ""}
+```
+
+- `name` is slugified (`"My NAS"` → `nas`); `scheme` defaults to `http` and
+  must be `http` or `https`; `ip` must be a valid IPv4; `domain` must be the
+  base or a configured alternate (empty = base).
+- Duplicate hostnames (against live routes or other custom entries) → `409`.
+- Success → `200 {"ok":true,"id":"custom:c…","hostname":"nas.home.example.com"}`
+  and the next sync publishes the route.
+
+## DELETE /api/slug with a custom key
+
+`{"key": "custom:<id>"}` removes the entry itself (not just an override) and
+cleans its toggle/domain state.
+
+## POST /api/slug with a custom key
+
+Rename (`slug`) and/or re-pick the domain of a custom entry — same body shape
+as infra edits. Renames update the entry's slug; the hostname is rebuilt.

@@ -262,3 +262,72 @@ func TestDomainInfraSwitches(t *testing.T) {
 		t.Error("resync not signalled")
 	}
 }
+
+func TestCustomEndpoint(t *testing.T) {
+	h := state.New("t")
+	dir := t.TempDir()
+	store := overrides.Open(filepath.Join(dir, "overrides.json"))
+	resync := make(chan struct{}, 4)
+	srv := httptest.NewServer(NewMux(h, Options{Edit: true, Store: store, Resync: resync,
+		Domains: []string{"home.example.com", "alt.example.com"}}))
+	defer srv.Close()
+	cli := srv.Client()
+	post := func(body string) (int, string) {
+		resp, err := cli.Post(srv.URL+"/api/custom", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+
+	// valid create
+	code, body := post(`{"name":"My NAS!","ip":"192.0.2.10","port":5000}`)
+	if code != 200 || !strings.Contains(body, "nas.home.example.com") {
+		t.Fatalf("create status=%d body=%s", code, body)
+	}
+	select {
+	case <-resync:
+	default:
+		t.Fatal("resync not signalled")
+	}
+
+	// duplicate hostname → conflict (store-level check)
+	if code, _ := post(`{"name":"my-nas","ip":"192.0.2.11","port":80}`); code != 409 {
+		t.Fatalf("dup hostname status=%d, want 409", code)
+	}
+	// validation failures
+	for _, bad := range []string{
+		`{"name":"","ip":"192.0.2.1","port":80}`,
+		`{"name":"x","ip":"not-an-ip","port":80}`,
+		`{"name":"x","ip":"192.0.2.1","port":0}`,
+		`{"name":"x","ip":"192.0.2.1","port":80,"scheme":"gopher"}`,
+		`{"name":"x","ip":"192.0.2.1","port":80,"domain":"evil.example.com"}`,
+	} {
+		if code, _ := post(bad); code != 400 {
+			t.Fatalf("bad payload status=%d, want 400: %s", code, bad)
+		}
+	}
+	// entry persisted with defaults applied (empty domain resolved to base)
+	f, _ := store.Load()
+	if len(f.Custom) != 1 || f.Custom[0].Scheme != "http" || f.Custom[0].Domain != "home.example.com" || f.Custom[0].Slug != "my-nas" {
+		t.Fatalf("custom entry = %+v", f.Custom)
+	}
+	// delete via /api/slug custom-key branch
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/slug",
+		strings.NewReader(`{"key":"custom:`+f.Custom[0].ID+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cli.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	b2, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b2), `"removed":true`) {
+		t.Fatalf("DELETE status=%d body=%s", resp.StatusCode, b2)
+	}
+	if len(store.ListCustom()) != 0 {
+		t.Fatal("entry not removed")
+	}
+}

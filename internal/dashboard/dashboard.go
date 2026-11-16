@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -102,6 +103,46 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid or key required"})
 			return
 		}
+		// Manually defined entries: rename/domain/delete act on the entry
+		// itself (DELETE removes the whole entry, not just an override).
+		if strings.HasPrefix(ident, "custom:") {
+			cid := strings.TrimPrefix(ident, "custom:")
+			if cid == "" || len(cid) > 64 {
+				writeJSON(http.StatusBadRequest, map[string]string{"error": "bad custom id"})
+				return
+			}
+			if req.Domain != "" && !domainAllowed(o, req.Domain) {
+				writeJSON(http.StatusBadRequest, map[string]string{"error": "domain not in the configured list"})
+				return
+			}
+			switch r.Method {
+			case http.MethodPost:
+				slug := transform.Slugify(req.Slug)
+				if slug == "" {
+					writeJSON(http.StatusBadRequest, map[string]string{"error": "slug must contain alphanumeric characters"})
+					return
+				}
+				if err := o.Store.SetCustomSlug(cid, slug); err != nil {
+					writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if err := o.Store.SetCustomDomain(cid, req.Domain); err != nil {
+					writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				signalResync(o)
+				writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "slug": slug, "domain": req.Domain})
+			case http.MethodDelete:
+				removed, err := o.Store.RemoveCustom(cid)
+				if err != nil {
+					writeJSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				signalResync(o)
+				writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "removed": removed})
+			}
+			return
+		}
 		if req.Domain != "" {
 			okDomain := false
 			for _, d := range o.Domains {
@@ -148,6 +189,93 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 			signalResync(o)
 			writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "cleared": existed})
 		}
+	})
+	// Manually defined entries: create a route for anything the monitor
+	// does not know about (NAS, docker host, router UI…). Same validation
+	// posture as every other mutation: edit-gated, strictly validated.
+	mux.HandleFunc("/api/custom", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON := func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+			return
+		}
+		if !o.Edit || o.Store == nil {
+			writeJSON(http.StatusForbidden, map[string]string{"error": "editing is disabled (dashboard.edit: false)"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "read body"})
+			return
+		}
+		var req struct {
+			Name   string `json:"name"`
+			Domain string `json:"domain"`
+			IP     string `json:"ip"`
+			Port   int    `json:"port"`
+			Scheme string `json:"scheme"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		slug := transform.Slugify(req.Name)
+		if slug == "" {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "name must contain alphanumeric characters"})
+			return
+		}
+		scheme := strings.ToLower(strings.TrimSpace(req.Scheme))
+		if scheme == "" {
+			scheme = "http"
+		}
+		if scheme != "http" && scheme != "https" {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "scheme must be http or https"})
+			return
+		}
+		ip := net.ParseIP(strings.TrimSpace(req.IP))
+		if ip == nil || ip.To4() == nil {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "a valid IPv4 address is required"})
+			return
+		}
+		if req.Port < 1 || req.Port > 65535 {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "port must be 1-65535"})
+			return
+		}
+		domain := req.Domain
+		if domain != "" && !domainAllowed(o, domain) {
+			writeJSON(http.StatusBadRequest, map[string]string{"error": "domain not in the configured list"})
+			return
+		}
+		if domain == "" && len(o.Domains) > 0 {
+			domain = o.Domains[0] // empty = the base domain
+		}
+		hostname := slug + "." + domain
+		for _, rt := range h.Get().Routes {
+			if rt.Hostname == hostname {
+				writeJSON(http.StatusConflict, map[string]string{"error": "hostname " + hostname + " already exists"})
+				return
+			}
+		}
+		e := overrides.CustomEntry{
+			ID:     "c" + strconv.FormatInt(time.Now().UnixMilli(), 10),
+			Name:   strings.TrimSpace(req.Name),
+			Slug:   slug,
+			Domain: domain,
+			IP:     ip.String(),
+			Port:   req.Port,
+			Scheme: scheme,
+		}
+		if err := o.Store.AddCustom(e); err != nil {
+			writeJSON(http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		signalResync(o)
+		writeJSON(http.StatusOK, map[string]any{"ok": true, "id": "custom:" + e.ID, "hostname": hostname})
 	})
 	mux.HandleFunc("/api/enabled", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON := func(code int, v any) {
@@ -274,6 +402,17 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		writeJSON(http.StatusOK, map[string]any{"ok": true, "disabled": req.Disabled})
 	})
 	return mux
+}
+
+// domainAllowed reports whether domain is the base or one of the configured
+// alternates.
+func domainAllowed(o Options, domain string) bool {
+	for _, d := range o.Domains {
+		if d == domain {
+			return true
+		}
+	}
+	return false
 }
 
 func signalResync(o Options) {

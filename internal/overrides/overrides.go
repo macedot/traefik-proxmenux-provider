@@ -16,6 +16,20 @@ type File struct {
 	Disabled      map[string]bool   `json:"disabled"`    // vmid/infra-key -> explicit state
 	DomainsOff    map[string]bool   `json:"domains_off"` // domain -> global off (multiplier)
 	InfraOff      bool              `json:"infra_off"`   // global infra switch
+	Custom        []CustomEntry     `json:"custom"`      // manually defined entries
+}
+
+// CustomEntry is a user-defined route created from the dashboard's + button.
+// ID is the stable identity ("custom:<id>" keys everywhere); Slug is current
+// (renames update it); Domain "" = config default.
+type CustomEntry struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Slug   string `json:"slug"`
+	Domain string `json:"domain"`
+	IP     string `json:"ip"`
+	Port   int    `json:"port"`
+	Scheme string `json:"scheme"`
 }
 
 type Store struct {
@@ -197,4 +211,98 @@ func (s *Store) saveLocked(f File) error {
 		return err
 	}
 	return os.Rename(tmpName, s.path)
+}
+
+// ListCustom returns the manually defined entries (empty when none).
+func (s *Store) ListCustom() []CustomEntry {
+	f, err := s.Load()
+	if err != nil {
+		return nil
+	}
+	return f.Custom
+}
+
+// AddCustom appends a manually defined entry; the ID must be unique and the
+// slug+domain combination must not collide with an existing entry.
+func (s *Store) AddCustom(e CustomEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	host := e.Slug + "." + e.Domain
+	for _, c := range f.Custom {
+		if c.ID == e.ID {
+			return fmt.Errorf("custom id %s already exists", e.ID)
+		}
+		if c.Slug+"."+c.Domain == host {
+			return fmt.Errorf("hostname %s already exists", host)
+		}
+	}
+	f.Custom = append(f.Custom, e)
+	return s.saveLocked(f)
+}
+
+// RemoveCustom deletes an entry and its toggle/domain state; reports whether
+// an entry was removed.
+func (s *Store) RemoveCustom(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return false, err
+	}
+	found := false
+	out := f.Custom[:0]
+	for _, c := range f.Custom {
+		if c.ID == id {
+			found = true
+			continue
+		}
+		out = append(out, c)
+	}
+	if !found {
+		return false, nil
+	}
+	f.Custom = out
+	key := "custom:" + id
+	delete(f.Disabled, key)
+	delete(f.Domains, key)
+	delete(f.SlugOverrides, key)
+	return true, s.saveLocked(f)
+}
+
+// SetCustomSlug renames a manually defined entry (caller slugifies).
+func (s *Store) SetCustomSlug(id, slug string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	for i := range f.Custom {
+		if f.Custom[i].ID == id {
+			f.Custom[i].Slug = slug
+			return s.saveLocked(f)
+		}
+	}
+	return fmt.Errorf("custom entry %s not found", id)
+}
+
+// SetCustomDomain stores the URL domain pick for an entry; empty = default.
+func (s *Store) SetCustomDomain(id, domain string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	for i := range f.Custom {
+		if f.Custom[i].ID == id {
+			f.Custom[i].Domain = domain
+			return s.saveLocked(f)
+		}
+	}
+	return fmt.Errorf("custom entry %s not found", id)
 }

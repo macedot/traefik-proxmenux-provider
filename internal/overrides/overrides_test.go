@@ -124,3 +124,48 @@ func TestStoreCorruptFile(t *testing.T) {
 		t.Fatalf("maps must be initialized even on error: %+v", f)
 	}
 }
+
+func TestCustomEntries(t *testing.T) {
+	st := Open(filepath.Join(t.TempDir(), "overrides.json"))
+	e := CustomEntry{ID: "c1", Name: "NAS", Slug: "nas", Domain: "", IP: "192.0.2.10", Port: 5000, Scheme: "http"}
+	if err := st.AddCustom(e); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if len(st.ListCustom()) != 1 {
+		t.Fatalf("list = %d, want 1", len(st.ListCustom()))
+	}
+	// duplicate hostname rejected
+	dup := e
+	dup.ID = "c2"
+	if err := st.AddCustom(dup); err == nil {
+		t.Fatal("duplicate hostname must be rejected")
+	}
+	// rename + domain pick
+	if err := st.SetCustomSlug("c1", "storage"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := st.SetCustomDomain("c1", "alt.example.com"); err != nil {
+		t.Fatalf("domain: %v", err)
+	}
+	got := st.ListCustom()[0]
+	if got.Slug != "storage" || got.Domain != "alt.example.com" {
+		t.Fatalf("entry = %+v", got)
+	}
+	// unknown id
+	if err := st.SetCustomSlug("nope", "x"); err == nil {
+		t.Fatal("unknown id must error")
+	}
+	// remove cleans toggle/domain state too
+	_ = st.SetDisabled("custom:c1", true)
+	removed, err := st.RemoveCustom("c1")
+	if err != nil || !removed {
+		t.Fatalf("remove: %v %v", removed, err)
+	}
+	f, _ := st.Load()
+	if len(f.Custom) != 0 || f.Disabled["custom:c1"] {
+		t.Fatalf("state not cleaned: %+v", f)
+	}
+	if removed2, _ := st.RemoveCustom("c1"); removed2 {
+		t.Fatal("second remove must report false")
+	}
+}

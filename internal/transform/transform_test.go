@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
+	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
 )
 
@@ -606,5 +607,27 @@ func TestPickIPStates(t *testing.T) {
 	g2 := guest(2, "g2", "lxc", "198.51.100.7", "running")
 	if ip, _, onNet = pickIP(g2, base()); ip != "198.51.100.7" || !onNet {
 		t.Fatalf("fallback = %q/%v", ip, onNet)
+	}
+}
+
+func TestBuildCustomRoutes(t *testing.T) {
+	cfg := base()
+	entries := []overrides.CustomEntry{
+		{ID: "c1", Name: "NAS", Slug: "nas", IP: "192.0.2.10", Port: 5000, Scheme: "http"},
+		{ID: "c2", Name: "Router", Slug: "router", Domain: "alt.example.com", IP: "192.0.2.1", Port: 443, Scheme: "https"},
+	}
+	rs := BuildCustomRoutes(entries, cfg)
+	if len(rs) != 2 {
+		t.Fatalf("routes = %d, want 2", len(rs))
+	}
+	if rs[0].Hostname != "nas.home.example.com" || rs[0].Key != "custom:c1" ||
+		rs[0].Kind != "custom" || rs[0].Target != "http://192.0.2.10:5000" || !rs[0].Served {
+		t.Fatalf("route0 = %+v", rs[0])
+	}
+	if rs[1].Hostname != "router.alt.example.com" || rs[1].Domain != "alt.example.com" {
+		t.Fatalf("route1 = %+v", rs[1])
+	}
+	if len(BuildCustomRoutes(nil, cfg)) != 0 {
+		t.Fatal("no entries must yield no routes")
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/macedot/traefik-proxmenux-provider/internal/config"
+	"github.com/macedot/traefik-proxmenux-provider/internal/overrides"
 	"github.com/macedot/traefik-proxmenux-provider/internal/proxmenux"
 )
 
@@ -369,6 +370,35 @@ func listenPortOf(listen string) int {
 		return 0
 	}
 	return n
+}
+
+// BuildCustomRoutes converts user-defined manual entries (dashboard + button)
+// into routes. They are probed and toggled like discovered apps — the caller
+// runs ProbeRoute and ApplyToggle (keys "custom:<id>") on the result.
+func BuildCustomRoutes(entries []overrides.CustomEntry, cfg *config.Config) []Route {
+	out := make([]Route, 0, len(entries))
+	for _, e := range entries {
+		dom := e.Domain
+		if dom == "" {
+			dom = cfg.Domain.Base
+		}
+		out = append(out, Route{
+			Slug:      e.Slug,
+			Hostname:  e.Slug + "." + dom,
+			Domain:    dom,
+			AppName:   e.Name,
+			Kind:      "custom",
+			Key:       "custom:" + e.ID,
+			GuestName: "custom",
+			IP:        e.IP,
+			Scheme:    e.Scheme,
+			Port:      e.Port,
+			WebPath:   "/",
+			Target:    fmt.Sprintf("%s://%s:%d", e.Scheme, e.IP, e.Port),
+			Served:    true,
+		})
+	}
+	return out
 }
 
 // ApplyInfraEdits applies dashboard/config edits to infrastructure routes:

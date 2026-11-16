@@ -19,6 +19,9 @@ no per-guest label editing.** Your only input: a domain.
 - Automatic HTTPS routes for every ProxMenux OCI-managed app
 - Status dashboard: rename + per-app domain picker, on/off toggles
   (🟢 / 🟠 / 🔴), routes grouped per domain, foldable sections
+- **Custom entries**: a `＋ add` button to publish anything the monitor
+  doesn't know about (NAS, docker host, router UI) — name, IP, port,
+  scheme, domain; probed/toggled/edited like any app, removable with ✕
 - TCP/TLS reachability probing — dead targets are never published;
   self-signed backends are served through a dedicated insecure transport
 - Atomic single-file generation (`conf.d/proxmenux-generated.yaml`) —

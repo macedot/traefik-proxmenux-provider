@@ -284,3 +284,30 @@ data: `GET /api/routes` (JSON, same source the UI renders).
 [route pipeline](route-pipeline.md) · [dashboard](dashboard.md) ·
 [HTTP API](api.md) · [security model](security.md) ·
 [operations](operations.md).*
+
+---
+
+## 11. Publishing something ProxMenux didn't install
+
+**Goal:** a NAS, a standalone docker host, a printer UI — anything the
+monitor doesn't report — should still get a proper `https://name.domain`
+route from the same Traefik.
+
+Open the dashboard → **Custom** section → **＋ add**. Fill in name (slugged
+automatically), IP, port, scheme (`http`/`https`), and pick the domain. The
+next sync:
+
+1. probes the target — an unreachable entry renders stale with the real
+   reason instead of a dead route
+2. publishes it like any discovered app: Traefik router, your TLS mode, your
+   `routing.middlewares`
+3. shows a normal card — domain link, clickable IP chip, status-dot toggle,
+   double-click rename/domain picker
+
+Remove it with the card's **✕** button (confirm; cleans toggle/domain state
+from `overrides.json` too).
+
+Use cases: `nas.home.example.com → 192.0.2.10:5001`, `router.home.example.com → 192.0.2.1:443`
+(served via the insecure transport — router UIs are self-signed), a
+Wake-on-LAN panel, a temporary dev server. Entries live in `overrides.json`
+(`custom: [...]`), survive restarts, and are never touched by monitor syncs.
