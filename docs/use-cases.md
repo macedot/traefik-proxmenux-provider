@@ -224,6 +224,10 @@ dashboard:
   enforced by the generator, not by convention.
 - The same gate exists for the `expose.dashboard` variant; both write CIDR
   allowlist middlewares into the generated router.
+- With `allow_cidrs` set, the dashboard also appears in the **infrastructure
+  section** of its own list as `apps.<base>` (slug editable, toggleable like
+  any infra entry) — pointing at the provider's `dashboard.listen` port via
+  loopback on the Traefik host.
 - `edit: false` turns the UI read-only (no renames, no toggles) — useful when
   you publish it broadly but edit only from the raw port.
 

@@ -189,7 +189,7 @@ func main() {
 		if cfg.Infra.Enabled {
 			if host, herr := client.SystemHostname(ctx); herr == nil {
 				if u, perr := url.Parse(cfg.ProxMenux.APIURL); perr == nil {
-					infra := transform.BuildInfraRoutes(cfg, host, u.Hostname())
+					infra := transform.BuildInfraRoutes(cfg, host, u.Hostname(), ownIP(cfg), ownHostname())
 					if cfg.Routing.Probe {
 						for i := range infra {
 							transform.ProbeRoute(&infra[i], cfg.Routing.ProbeTimeout.Std())
@@ -290,6 +290,57 @@ func main() {
 			}
 		}
 	}
+}
+
+// ownIP returns the provider's own LAN address (first non-loopback IPv4,
+// preferring the resolved match subnet) for the infra dashboard entry.
+func ownIP(cfg *config.Config) string {
+	var sub *net.IPNet
+	if cfg.ProxMenux.LANResolved != "" {
+		if _, n, err := net.ParseCIDR(cfg.ProxMenux.LANResolved); err == nil {
+			sub = n
+		}
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	fallback := ""
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip4 := ipn.IP.To4()
+			if ip4 == nil || ip4.IsLoopback() || ip4.IsLinkLocalUnicast() {
+				continue
+			}
+			if sub != nil && sub.Contains(ip4) {
+				return ip4.String()
+			}
+			if fallback == "" {
+				fallback = ip4.String()
+			}
+		}
+	}
+	return fallback
+}
+
+// ownHostname returns this machine's hostname for the infra dashboard entry.
+func ownHostname() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "traefik"
+	}
+	return h
 }
 
 // resolveLAN fills ProxMenux.LANResolved: the explicit lan_cidr when set,

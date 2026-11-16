@@ -90,7 +90,7 @@ Everything else has a safe default — the minimal config is three lines.
 | | `hostname` | `provider` | subdomain for `via_traefik` |
 | | `allow_cidrs` | – | **required** for any Traefik-published UI |
 | | `edit` | `true` | rename/domain-picker/toggles from the UI |
-| `infra` | `enabled` | `true` | `<host>` (PVE UI) + `menux` (ProxMenux UI) |
+| `infra` | `enabled` | `true` | `<host>` (PVE UI), `menux` (ProxMenux UI) + `apps` (this provider's dashboard — only with `dashboard.allow_cidrs`) |
 | `output` | `file` | `conf.d/proxmenux-generated.yaml` | the only file written |
 | | `mode` | `"0644"` | output file mode |
 | | `backup` | `true` | keep `.bak` before each change |

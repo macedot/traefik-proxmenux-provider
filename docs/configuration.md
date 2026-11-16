@@ -68,7 +68,7 @@ Full annotated example: [`config.example.yaml`](../config.example.yaml).
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`menux`) on the base domain; editable + toggleable like apps (keys `infra:<slug>`) |
+| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`menux`) on the base domain; plus the provider's own dashboard as `apps` **only when** `dashboard.allow_cidrs` is set (fail-closed — the UI carries edit endpoints). Editable + toggleable like apps (keys `infra:<slug>`) |
 
 ## dashboard
 

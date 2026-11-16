@@ -304,3 +304,26 @@ func TestRenderInsecureTransport(t *testing.T) {
 		t.Fatal("pmp-insecure serversTransport missing for insecure route")
 	}
 }
+
+func TestRenderAppsInfraAllowlisted(t *testing.T) {
+	c, _ := config.Parse([]byte("proxmenux:\n  api_url: http://h:8008\ndomain:\n  base: home.example.com\ndashboard:\n  allow_cidrs: [\"192.0.2.0/24\"]\n"))
+	r := transform.Route{Slug: "apps", Hostname: "apps.home.example.com", Kind: "infra", Key: "infra:apps", IP: "192.0.2.50", Scheme: "http", Port: 8082, Target: "http://127.0.0.1:8082", Served: true}
+	out, err := Render([]transform.Route{r}, c)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "pmp-apps-allowlist") || !strings.Contains(s, "ipAllowList") || !strings.Contains(s, "apps.home.example.com") {
+		t.Fatalf("apps router missing allowlist:\n%s", s)
+	}
+
+	// fail-closed: without allow_cidrs the router is never emitted
+	c2, _ := config.Parse([]byte("proxmenux:\n  api_url: http://h:8008\ndomain:\n  base: home.example.com\n"))
+	out2, err := Render([]transform.Route{r}, c2)
+	if err != nil {
+		t.Fatalf("render2: %v", err)
+	}
+	if strings.Contains(string(out2), "apps.home.example.com") {
+		t.Fatalf("apps router emitted without allowlist:\n%s", out2)
+	}
+}

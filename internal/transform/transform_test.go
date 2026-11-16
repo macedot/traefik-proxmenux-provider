@@ -287,7 +287,7 @@ func TestSidecarsAreReported(t *testing.T) {
 
 func TestBuildInfraRoutes(t *testing.T) {
 	cfg := base()
-	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99")
+	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99", "", "")
 	if len(infra) != 2 {
 		t.Fatalf("infra routes = %d, want 2 (pve + menux)", len(infra))
 	}
@@ -307,13 +307,43 @@ func TestBuildInfraRoutes(t *testing.T) {
 		t.Errorf("PVE route must be insecure-skip-verify (self-signed)")
 	}
 
-	if BuildInfraRoutes(cfg, "", "1.2.3.4") != nil {
+	if BuildInfraRoutes(cfg, "", "1.2.3.4", "", "") != nil {
 		t.Error("empty host must yield nil")
 	}
 	off := *cfg
 	off.Infra.Enabled = false
-	if BuildInfraRoutes(&off, "pve-host", "1.2.3.4") != nil {
+	if BuildInfraRoutes(&off, "pve-host", "1.2.3.4", "", "") != nil {
 		t.Error("infra disabled must yield nil")
+	}
+}
+
+func TestBuildInfraRoutesDashboard(t *testing.T) {
+	cfg := base()
+	cfg.Dashboard.Enabled = true
+	cfg.Dashboard.Listen = ":8082"
+	cfg.Dashboard.AllowCIDRs = []string{"192.0.2.0/24"}
+
+	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99", "192.0.2.50", "tht")
+	if len(infra) != 3 {
+		t.Fatalf("infra routes = %d, want 3 (pve + menux + apps)", len(infra))
+	}
+	apps := infra[2]
+	if apps.Key != "infra:apps" || apps.Hostname != "apps.home.example.com" ||
+		apps.Target != "http://127.0.0.1:8082" || apps.IP != "192.0.2.50" || !apps.Served {
+		t.Fatalf("apps entry = %+v", apps)
+	}
+
+	// fail-closed: no allow_cidrs -> no dashboard entry at all
+	cfg.Dashboard.AllowCIDRs = nil
+	if infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99", "192.0.2.50", "tht"); len(infra) != 2 {
+		t.Fatalf("without allow_cidrs: infra = %d, want 2", len(infra))
+	}
+
+	// unparsable listen -> entry skipped
+	cfg.Dashboard.AllowCIDRs = []string{"192.0.2.0/24"}
+	cfg.Dashboard.Listen = "bad"
+	if infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99", "192.0.2.50", "tht"); len(infra) != 2 {
+		t.Fatalf("bad listen: infra = %d, want 2", len(infra))
 	}
 }
 
@@ -371,7 +401,7 @@ func TestDefaultEnabledConfig(t *testing.T) {
 func TestInfraToggle(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
-	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98")
+	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98", "", "")
 	if len(infra) != 2 {
 		t.Fatalf("infra routes = %d, want 2 (pve + menux)", len(infra))
 	}
@@ -475,7 +505,7 @@ func TestProbeRouteTLS(t *testing.T) {
 func TestApplyInfraEdits(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
-	infra := BuildInfraRoutes(cfg, "pvehost", "192.0.2.99")
+	infra := BuildInfraRoutes(cfg, "pvehost", "192.0.2.99", "", "")
 	slugs := map[string]string{"infra:menux": "prox-ui"}
 	domains := map[string]string{"infra:menux": "alt.example.com"}
 	ApplyInfraEdits(infra, slugs, domains)

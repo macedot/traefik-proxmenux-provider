@@ -326,10 +326,13 @@ func mergePorts(g proxmenux.Guest, extras []ServicePort) []ServicePort {
 }
 
 // BuildInfraRoutes builds the static infrastructure routes on the provider
-// domain, mirroring ProxDnx's static entries: <host> (PVE UI :8006) and the
-// ProxMenux UI on menux / proxmenux (:8008). Entries are editable (slug +
-// domain) with the stable key "infra:<default-slug>".
-func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
+// domain, mirroring ProxDnx's static entries: <host> (PVE UI :8006) and
+// menux (ProxMenux UI :8008) — plus, fail-closed, the provider's own
+// dashboard as apps.<domain>: it is only added when dashboard.allow_cidrs
+// is set, because the UI carries mutation endpoints and must never be
+// published world-open. Entries are editable (slug + domain) with the
+// stable key "infra:<default-slug>".
+func BuildInfraRoutes(cfg *config.Config, host, apiIP, ownIP, ownHost string) []Route {
 	if !cfg.Infra.Enabled || host == "" || apiIP == "" {
 		return nil
 	}
@@ -341,11 +344,31 @@ func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 	pve := Route{Slug: host, Hostname: host + "." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "Proxmox VE", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "https", Port: 8006, Insecure: true,
 		Target: "https://" + apiIP + ":8006"}
 	out := append([]Route{pve}, menux...)
+	if cfg.Dashboard.Enabled && len(cfg.Dashboard.AllowCIDRs) > 0 && ownIP != "" {
+		if dport := listenPortOf(cfg.Dashboard.Listen); dport > 0 {
+			out = append(out, Route{Slug: "apps", Hostname: "apps." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "Provider dashboard", Kind: "infra", GuestName: ownHost, IP: ownIP, Scheme: "http", Port: dport,
+				Target: "http://127.0.0.1:" + strconv.Itoa(dport)})
+		}
+	}
 	for i := range out {
 		out[i].Served = true
 		out[i].Key = "infra:" + out[i].Slug
 	}
 	return out
+}
+
+// listenPortOf extracts the port from a listen address like ":8082" or
+// "127.0.0.1:8082"; 0 when unparsable.
+func listenPortOf(listen string) int {
+	_, p, err := net.SplitHostPort(listen)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // ApplyInfraEdits applies dashboard/config edits to infrastructure routes:

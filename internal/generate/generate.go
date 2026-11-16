@@ -156,6 +156,16 @@ func Render(routes []transform.Route, cfg *config.Config) ([]byte, error) {
 			TLS:         routerTLS(cfg),
 		}
 		router.Middlewares = append(router.Middlewares, cfg.Routing.Middlewares...)
+		if r.Key == "infra:apps" {
+			// The provider dashboard listed under the infra section:
+			// fail-closed — without an allowlist the router is never
+			// emitted, even if a stale entry slipped through transforms.
+			am := allowlistMiddleware("pmp-apps-allowlist", cfg.Dashboard.AllowCIDRs, d.HTTP.Middlewares)
+			if len(am) == 0 {
+				continue
+			}
+			router.Middlewares = append(router.Middlewares, am...)
+		}
 		d.HTTP.Routers[svcName] = router
 	}
 
