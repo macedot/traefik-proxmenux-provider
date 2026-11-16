@@ -66,6 +66,9 @@ func main() {
 	store := overrides.Open(cfg.ProxMenux.OverridesPath)
 	if err := resolveLAN(cfg); err != nil {
 		logger.Warn("could not auto-detect LAN subnet; add proxmenux.lan_cidr to config", "err", err)
+	} else if cfg.ProxMenux.LANResolved != "" {
+		logger.Info("guest-IP match subnet", "cidr", cfg.ProxMenux.LANResolved,
+			"bridge_gateway", cfg.ProxMenux.BridgeResolved)
 	}
 	// Pristine config slug overrides — the merge target must never be the
 	// map the previous sync mutated, or cleared overrides would stick.

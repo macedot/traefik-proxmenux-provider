@@ -4,6 +4,7 @@
 # REQUIRED inputs are only:  domain.base   (+ tls.email unless tls.mode=internal)
 # Everything else has safe defaults. This file must never contain secrets:
 # the API token lives in its own 0600 file referenced by proxmenux.token_file.
+# Every key below is listed; unknown keys are rejected (strict parsing).
 
 provider:
   poll_interval: 30s          # how often to re-sync routes (min 10s, enforced)
@@ -18,9 +19,18 @@ proxmenux:
   #   this when ProxMenux monitor auth is enabled; leave unset when not.
   timeout: 10s                # per-request timeout
   max_response_bytes: 5242880 # response size cap (5 MiB)
-  # lan_cidr: 10.0.0.0/24     # prefer guest IPs in this subnet; default: the
-                              # provider CT's own /24 (guests behind gluetun/VPN
-                              # report the VPN IP first — stale-tagged instead)
+  bridge: vmbr0               # PVE host adapter whose network guest IPs are
+                              # matched against. From a guest on that bridge
+                              # the default gateway IS the host address on the
+                              # adapter — that subnet wins for multi-NIC guests.
+  # lan_cidr: 192.0.2.0/24    # explicit override for the subnet above. When
+                              # unset it is auto-resolved in order:
+                              #   1. the bridge adapter's network (gateway)
+                              #   2. the PVE host's /24 from api_url
+                              #   3. the provider's own /24
+                              # Guests whose IPs all live elsewhere (gluetun/
+                              # VPN sidecars, isolated bridges) are never
+                              # published — they show stale "no ip available".
 
 domain:
   base: home.example.com      # REQUIRED: every app becomes <slug>.base
@@ -29,8 +39,8 @@ domain:
   #   - alt.example.com       # dashboard edit dialog (first = default)
   slug_source: watch          # watch    = app name ("AdGuard Home" -> adguard-home)
                               # hostname = LXC/VM hostname
-  # slug_overrides:           # optional manual slug fixes, keyed by vmid or name
-  #   "AdGuard Home": dns
+  # slug_overrides:           # static slug fixes applied before the dashboard's
+  #   "AdGuard Home": dns     # runtime overrides.json (keyed by app name)
   # include_vmid_suffix: false  # true -> adguard-home-100 (collision-proof slugs)
 
 tls:
@@ -42,51 +52,55 @@ tls:
                               # wildcard: DNS-01 *.base — best for CF-proxied
                               #           zones; requires dns_provider
   # email: you@example.com    # REQUIRED unless mode=internal (ACME account)
+  cert_resolver: letsencrypt  # Traefik certResolvers entry for ACME modes
   # dns_provider: cloudflare  # wildcard mode only (lego provider name)
   # dns_credentials_file: /etc/traefik-proxmenux/dns.env  # 0600, provider creds
 
 routing:
   default_enabled: true       # apps are served unless toggled off in the dashboard.
-                               # false = opt-in: every app starts disabled (grayed card)
-                               # until enabled one by one from the dashboard.
+                              # false = opt-in: every app starts disabled (grayed card)
+                              # until enabled one by one from the dashboard.
   entrypoint: websecure       # entryPoint receiving generated routers
   # middlewares: []           # extra middlewares on every router,
-                              # e.g. [secure-headers@file]
-  probe: true                 # TCP-check ip:port before publishing a route —
+                              # e.g. [secure-headers@file] or [crowdsec@file]
+  probe: true                 # TCP/TLS-check ip:port before publishing a route —
                               # skips dead or drifted apps instead of exposing
-                              # them
-  probe_timeout: 2s
+                              # them. HTTPS targets are probed with certificate
+                              # verification ON; self-signed/untrusted certs are
+                              # served via a shared insecure transport.
+  probe_timeout: 1.2s
   health_check: false         # add Traefik health checks from web_path/health_path
 
 expose:
   # allow: []                 # slugs to expose; empty = all discovered apps
   # deny: []                  # slugs never exposed (wins over allow)
-  dashboard:
-    enabled: false            # publish traefik.<base> with CIDR allowlist —
-                              # the secure replacement for api.insecure
-    # allow_cidrs: ["10.0.0.0/8"]
+  dashboard:                  # publishing the PROVIDER UI itself through Traefik
+    enabled: false            # fail-closed: without allow_cidrs no route is
+    # allow_cidrs: ["192.0.2.0/24"]   # generated at all
+    # hostname: provider      # subdomain under domain.base
 
 dashboard:
   enabled: true               # built-in status UI (ProxDnx-style):
                               # every generated URL per container, probe
                               # results, skip reasons, sync times.
                               # JSON endpoint: GET /api/routes
-  listen: ":8082"             # bind addr; "127.0.0.1:8082" = localhost only (8081 is often crowdsec)
-  via_traefik: false          # also publish https://<hostname>.<domain> through
+  listen: ":8082"             # bind addr; "127.0.0.1:8082" = localhost only
+  via_traefik: false          # also publish https://provider.<base> through
                               # Traefik (same generated TLS) with CIDR
                               # allowlist — recommended access path
+  hostname: provider          # subdomain when via_traefik: true
+  # allow_cidrs: ["192.0.2.0/24"]   # required for any Traefik-published route
   edit: true                  # double-click a URL to rename it (persists to
                               # overrides.json next to the config)
-  # hostname: provider        # subdomain when via_traefik: true
-  # allow_cidrs: ["192.0.2.0/24"]
 
 infra:
   enabled: true               # static entries on the provider domain
                               # (ProxDnx parity): <host>.<domain> -> Proxmox UI
-                              # :8006, <host>.menux.<domain> + menux.<domain> +
-                              # proxmenux.<domain> -> ProxMenux UI :8008
+                              # :8006 and menux.<domain> -> ProxMenux UI :8008.
+                              # Editable + toggleable like apps (keys
+                              # infra:<default-slug>).
 
 output:
   file: /etc/traefik/conf.d/proxmenux-generated.yaml
-  mode: 0o644
+  mode: "0644"
   backup: true                # keep a .bak of the output before each change

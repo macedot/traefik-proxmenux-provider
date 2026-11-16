@@ -47,19 +47,66 @@ Rollback: stop the unit and delete `conf.d/proxmenux-generated.yaml`.
 
 ## Configuration
 
-[`config.example.yaml`](config.example.yaml) documents every key. Required
-inputs: `domain.base` (+ `tls.email` unless `tls.mode: internal`).
+[`config.example.yaml`](config.example.yaml) lists every key with comments;
+[`docs/configuration.md`](docs/configuration.md) is the full reference.
+Required inputs: `domain.base` (+ `tls.email` unless `tls.mode: internal`).
+Everything else has a safe default — the minimal config is three lines.
 
-| Key | Values | Default |
-|-----|--------|---------|
-| `domain.base` | your domain | – (required) |
-| `domain.alternates` | extra domains, pickable per app | – |
-| `tls.mode` | `internal` · `per-app` · `wildcard` | `internal` |
-| `proxmenux.source` | `oci` · `watches` · `all` | `oci` |
-| `routing.probe` | reachability probe before publish | `true` |
-| `routing.default_enabled` | `false` = opt-in: apps start disabled | `true` |
-| `dashboard.edit` | allow renames/toggles from the UI | `true` |
-| `proxmenux.token_file` | Bearer token (0600) if the monitor needs one | – |
+<details open>
+<summary><b>All keys</b> — every configurable option, with defaults</summary>
+
+| Section | Key | Default | Purpose |
+|---------|-----|---------|---------|
+| `provider` | `poll_interval` | `30s` | re-sync cadence (min 10s) |
+| | `log_level` | `info` | `debug`·`info`·`warn`·`error` |
+| `proxmenux` | `api_url` | – (required) | monitor API on the PVE host |
+| | `token_file` | – | 0600 Bearer token file, iff-auth |
+| | `timeout` | `10s` | per-request timeout |
+| | `max_response_bytes` | `5242880` | response size cap |
+| | `bridge` | `vmbr0` | PVE host adapter for guest-IP matching |
+| | `lan_cidr` | auto | override the auto-resolved subnet |
+| `domain` | `base` | – (required) | default domain: `<slug>.base` |
+| | `alternates` | – | extra domains, pickable per app |
+| | `slug_source` | `watch` | `watch` (app name) or `hostname` |
+| | `slug_overrides` | – | static slug fixes |
+| | `include_vmid_suffix` | `false` | `<slug>-<vmid>` slugs |
+| `tls` | `mode` | `internal` | `internal`·`per-app`·`wildcard` |
+| | `email` | – | ACME account (non-internal modes) |
+| | `cert_resolver` | `letsencrypt` | Traefik resolver for ACME modes |
+| | `dns_provider` | – | lego provider for `wildcard` (DNS-01) |
+| | `dns_credentials_file` | – | 0600 DNS provider credentials |
+| `routing` | `default_enabled` | `true` | `false` = apps start disabled |
+| | `entrypoint` | `websecure` | entryPoint for generated routers |
+| | `middlewares` | `[]` | middlewares on every router |
+| | `probe` | `true` | TCP/TLS reachability check before publish |
+| | `probe_timeout` | `1.2s` | per-target probe timeout |
+| | `health_check` | `false` | Traefik health checks from watch paths |
+| `expose` | `allow` | `[]` (=all) | slugs to expose |
+| | `deny` | – | slugs never exposed (wins) |
+| | `dashboard.*` | off | publish the provider UI via Traefik (fail-closed: needs `allow_cidrs`) |
+| `dashboard` | `enabled` | `true` | built-in status UI |
+| | `listen` | `:8082` | bind address |
+| | `via_traefik` | `false` | also publish `provider.<base>` |
+| | `hostname` | `provider` | subdomain for `via_traefik` |
+| | `allow_cidrs` | – | **required** for any Traefik-published UI |
+| | `edit` | `true` | rename/domain-picker/toggles from the UI |
+| `infra` | `enabled` | `true` | `<host>` (PVE UI) + `menux` (ProxMenux UI) |
+| `output` | `file` | `conf.d/proxmenux-generated.yaml` | the only file written |
+| | `mode` | `"0644"` | output file mode |
+| | `backup` | `true` | keep `.bak` before each change |
+
+</details>
+
+Minimal config:
+
+```yaml
+proxmenux:
+  api_url: http://<pve-host>:8008
+domain:
+  base: home.example.com
+```
+
+Detailed walkthroughs per scenario live in [`docs/use-cases.md`](docs/use-cases.md).
 
 ## Dashboard
 
