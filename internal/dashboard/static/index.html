@@ -127,8 +127,8 @@ function startEdit(card,x,link){
     else if(ev.key==="Escape"){ev.preventDefault();cancel.onclick();}
   };
   // the stable identity: infra uses key ("infra:<slug>"), apps use vmid
-  const identBody=()=>({key:x.key||undefined,vmid:x.key?undefined:x.vmid,slug:inp.value,domain:sel.value});
-  const identFind=(rs)=>rs.find(v=>x.key?v.key===x.key:(v.kind==="app"&&v.vmid===x.vmid));
+  const identBody=()=>({key:x.key||undefined,vmid:x.key?undefined:x.vmid,port:x.key?undefined:x.port,slug:inp.value,domain:sel.value});
+  const identFind=(rs)=>rs.find(v=>x.key?v.key===x.key:(v.kind==="app"&&v.vmid===x.vmid&&(!x.port||v.port===x.port)));
   // picking a domain applies immediately: gray + pulse the card until the
   // route is republished under the new domain
   sel.onchange=async()=>{
@@ -150,12 +150,13 @@ function startEdit(card,x,link){
   const save=document.createElement("button");save.className="ebtn save";save.textContent="✓ save";
   const def=document.createElement("button");def.className="ebtn";def.textContent="↺ default";
   const cancel=document.createElement("button");cancel.className="ebtn";cancel.textContent="✕ discard";
-  save.onclick=async()=>{
+  const freeze=(on)=>{inp.disabled=on;sel.disabled=on;def.disabled=on;cancel.disabled=on;};
+    save.onclick=async()=>{
     if(save.disabled)return;
-    save.disabled=true;save.textContent="⟳ syncing";
+    freeze(true);save.disabled=true;save.textContent="⟳ syncing";
     const r=await fetch("/api/slug",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify(identBody())});
-    if(!r.ok){const j=await r.json().catch(()=>({}));save.disabled=false;save.textContent=j.error||"error";return}
+    if(!r.ok){freeze(false);save.disabled=false;save.textContent=j.error||"error";return}
     // server slugifies; mirror it to detect the republished hostname
     const slug=inp.value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const want=slug+"."+sel.value;
@@ -164,10 +165,12 @@ function startEdit(card,x,link){
   };
   def.onclick=async()=>{
     if(def.disabled)return;
-    def.disabled=true;def.textContent="⟳ syncing";
-    await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(identBody())});
-    await waitSync(rs=>{const rt=identFind(rs);return !!rt&&rt.hostname!==x.hostname});
+    freeze(true);def.disabled=true;def.textContent="⟳ syncing";
+    try{
+      await fetch("/api/slug",{method:"DELETE",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(identBody())});
+      await waitSync(rs=>{const rt=identFind(rs);return !!rt&&rt.hostname!==x.hostname});
+    }catch(e){freeze(false);def.disabled=false;def.textContent="default";return}
     EDITING=false;load();
   };
   cancel.onclick=()=>{EDITING=false;load();};
@@ -247,24 +250,24 @@ async function load(){
         tgl.onclick=async()=>{
           if(tgl.disabled)return;
           const want=!x.disabled;
-          const key="v"+x.vmid;
-          inflight.add(key);refreshDomainDot(x.domain);
+          const vkey=x.key||("v"+x.vmid+":"+x.port);
+          inflight.add(vkey);refreshDomainDot(x.domain);
           tgl.disabled=true;tgl.textContent="🟠";tgl.title="applying…";
           const r=await fetch("/api/enabled",{method:"POST",headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({vmid:x.vmid,disabled:!x.disabled})});
+            body:JSON.stringify({vmid:x.vmid,port:x.port,disabled:!x.disabled})});
           if(!r.ok){const j=await r.json().catch(()=>({}));tgl.disabled=false;tgl.textContent=j.error||"error";
-            inflight.delete(key);refreshDomainDot(x.domain);return}
-          await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid);return !!rt&&rt.served===want});
+            inflight.delete(vkey);refreshDomainDot(x.domain);return}
+          await waitSync(rs=>{const rt=rs.find(v=>v.kind==="app"&&v.vmid===x.vmid&&(!x.port||v.port===x.port));return !!rt&&rt.served===want});
           // patch this card in place instead of reloading the whole page
           try{
             const s2=await (await fetch("/api/routes",{cache:"no-store"})).json();
-            const rt=(s2.routes||[]).find(v=>v.kind==="app"&&v.vmid===x.vmid);
-            if(rt){const nel=makeCard(rt,s2);const old=views.get("v"+x.vmid);
-              if(old&&old.parentNode)old.replaceWith(nel);views.set("v"+x.vmid,nel);
-              viewData.set("v"+x.vmid,rt);}
+            const rt=(s2.routes||[]).find(v=>v.kind==="app"&&v.vmid===x.vmid&&(!x.port||v.port===x.port));
+            if(rt){const nel=makeCard(rt,s2);const old=views.get(vkey);
+              if(old&&old.parentNode)old.replaceWith(nel);views.set(vkey,nel);
+              viewData.set(vkey,rt);}
             else load();
           }catch(e){load()}
-          inflight.delete(key);refreshDomainDot(x.domain);
+          inflight.delete(vkey);refreshDomainDot(x.domain);
         };
       }
       c.appendChild(ch);

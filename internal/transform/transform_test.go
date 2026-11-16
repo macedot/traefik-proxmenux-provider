@@ -631,3 +631,48 @@ func TestBuildCustomRoutes(t *testing.T) {
 		t.Fatal("no entries must yield no routes")
 	}
 }
+
+func TestPerServiceOverrides(t *testing.T) {
+	port, stop := openPort(t)
+	defer stop()
+	port2 := port + 1
+
+	cfg := base()
+	// fine-grained: two UIs on one box get independent slugs
+	cfg.Domain.SlugOverrides = map[string]string{
+		"100:" + itoa(port):  "ui-one",
+		"100:" + itoa(port2): "ui-two",
+	}
+	g := guest(100, "multi", "lxc", "127.0.0.1", "running",
+		watch("Alpha", port), watch("Beta", port2))
+	res := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg)
+	if len(res.Routes) != 2 {
+		t.Fatalf("routes = %d, want 2", len(res.Routes))
+	}
+	if res.Routes[0].Slug != "ui-one" || res.Routes[1].Slug != "ui-two" {
+		t.Fatalf("slugs = %s, %s", res.Routes[0].Slug, res.Routes[1].Slug)
+	}
+
+	// legacy whole-box override still applies when no per-service key exists
+	cfg2 := base()
+	cfg2.Domain.SlugOverrides = map[string]string{"100": "boxed"}
+	res2 := Transform([]proxmenux.Guest{g}, nil, nil, nil, nil, cfg2)
+	for _, r := range res2.Routes {
+		if r.Slug != "boxed" && r.Slug != "boxed-100" {
+			t.Fatalf("legacy override not applied: %s", r.Slug)
+		}
+	}
+
+	// per-service toggle: disabling one port leaves the other on
+	cfg3 := base()
+	cfg3.Routing.Probe = false
+	disabled := map[string]bool{"100:" + itoa(port): true}
+	res3 := Transform([]proxmenux.Guest{g}, nil, disabled, nil, nil, cfg3)
+	bySlug := map[string]bool{}
+	for _, r := range res3.Routes {
+		bySlug[r.Slug] = r.Disabled
+	}
+	if !bySlug["alpha"] || bySlug["beta"] {
+		t.Fatalf("per-port toggle wrong: %+v", bySlug)
+	}
+}

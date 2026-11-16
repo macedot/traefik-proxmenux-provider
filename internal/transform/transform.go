@@ -167,12 +167,15 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 				continue
 			}
 
-			slug := resolveSlug(sp.Name, g, cfg)
+			slug := resolveSlug(sp.Name, g, sp.Port, cfg)
 			if slug == "" {
 				continue
 			}
 			// Hostname is slug + the app's domain (per-vmid override or default).
-			appDomain := routeDomains[strconv.Itoa(g.VMID)]
+			appDomain := routeDomains[vmidPortKey(g.VMID, sp.Port)]
+			if appDomain == "" {
+				appDomain = routeDomains[strconv.Itoa(g.VMID)] // legacy whole-box pick
+			}
 			if appDomain == "" {
 				appDomain = cfg.Domain.Base
 			}
@@ -229,7 +232,9 @@ func Transform(guests []proxmenux.Guest, extras map[int][]ServicePort, disabled 
 			// (routing.default_enabled). A domain-level off multiplies on
 			// top (the app state itself is untouched).
 			var isDisabled bool
-			if v, explicit := disabled[strconv.Itoa(g.VMID)]; explicit {
+			if v, explicit := disabled[vmidPortKey(g.VMID, sp.Port)]; explicit {
+				isDisabled = v
+			} else if v, explicit := disabled[strconv.Itoa(g.VMID)]; explicit { // legacy whole-box
 				isDisabled = v
 			} else {
 				isDisabled = !cfg.Routing.DefaultEnabled
@@ -638,8 +643,13 @@ func excludedIP(ip string) bool {
 
 // resolveSlug: explicit override (config + dashboard) wins, then the
 // service name — ProxDnx slugs from the service name, not the hostname.
-func resolveSlug(serviceName string, g proxmenux.Guest, cfg *config.Config) string {
-	if s, ok := cfg.Domain.SlugOverrides[strconv.Itoa(g.VMID)]; ok {
+func resolveSlug(serviceName string, g proxmenux.Guest, port int, cfg *config.Config) string {
+	// per-service identity first: one box can host several web UIs
+	// (different ports), each with its own slug
+	if s, ok := cfg.Domain.SlugOverrides[vmidPortKey(g.VMID, port)]; ok {
+		return Slugify(s)
+	}
+	if s, ok := cfg.Domain.SlugOverrides[strconv.Itoa(g.VMID)]; ok { // legacy: whole box
 		return Slugify(s)
 	}
 	if s, ok := cfg.Domain.SlugOverrides[serviceName]; ok {
@@ -652,6 +662,11 @@ func resolveSlug(serviceName string, g proxmenux.Guest, cfg *config.Config) stri
 		return Slugify(g.Name)
 	}
 	return Slugify(serviceName)
+}
+
+// vmidPortKey is the per-service override identity for app routes.
+func vmidPortKey(vmid, port int) string {
+	return strconv.Itoa(vmid) + ":" + strconv.Itoa(port)
 }
 
 func portScheme(scheme string) string {

@@ -87,7 +87,8 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		}
 		var req struct {
 			VMID   int    `json:"vmid"`
-			Key    string `json:"key"` // infra entries ("infra:<slug>"); vmid otherwise
+			Port   int    `json:"port"` // per-service identity: vmid:port (one box, several UIs)
+			Key    string `json:"key"`  // infra entries ("infra:<slug>"); vmid otherwise
 			Slug   string `json:"slug"`
 			Domain string `json:"domain"` // optional: pick from cfg domains; empty = default
 		}
@@ -98,6 +99,9 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		ident := req.Key
 		if ident == "" && req.VMID > 0 {
 			ident = strconv.Itoa(req.VMID)
+			if req.Port > 0 {
+				ident += ":" + strconv.Itoa(req.Port)
+			}
 		}
 		if ident == "" || len(ident) > 64 || strings.ContainsAny(ident, "/\\ 	\n") {
 			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid or key required"})
@@ -186,6 +190,11 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 				return
 			}
 			_, _ = o.Store.ClearDomain(ident)
+			// a per-service ident also clears any legacy whole-box override
+			if i := strings.Index(ident, ":"); i > 0 && !strings.HasPrefix(ident, "infra:") && !strings.HasPrefix(ident, "custom:") {
+				_, _ = o.Store.ClearSlug(ident[:i])
+				_, _ = o.Store.ClearDomain(ident[:i])
+			}
 			signalResync(o)
 			writeJSON(http.StatusOK, map[string]any{"ok": true, "id": ident, "cleared": existed})
 		}
@@ -299,7 +308,8 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		}
 		var req struct {
 			VMID     int    `json:"vmid"`
-			Key      string `json:"key"` // infra entries ("infra:<slug>"); vmid otherwise
+			Port     int    `json:"port"` // per-service identity: vmid:port (one box, several UIs)
+			Key      string `json:"key"`  // infra entries ("infra:<slug>"); vmid otherwise
 			Disabled bool   `json:"disabled"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -309,6 +319,9 @@ func NewMux(h *state.Holder, o Options) *http.ServeMux {
 		key := req.Key
 		if key == "" && req.VMID > 0 {
 			key = strconv.Itoa(req.VMID)
+			if req.Port > 0 {
+				key += ":" + strconv.Itoa(req.Port)
+			}
 		}
 		if key == "" || len(key) > 64 || strings.ContainsAny(key, "/\\ 	\n") {
 			writeJSON(http.StatusBadRequest, map[string]string{"error": "vmid or key required"})
