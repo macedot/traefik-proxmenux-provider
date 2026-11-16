@@ -36,7 +36,7 @@ One static Go binary, stdlib-only plus a YAML marshal dependency.
 4. **Transform** → `[]Route` (see [route-pipeline.md](route-pipeline.md)),
    including probing.
 5. **Infra entries** (PVE UI on `:8006`, ProxMenux UI on `:8008` under
-   `<host>.menux` / `menux` / `proxmenux`) are built from the monitor's
+   `<host>` / `menux`) are built from the monitor's
    hostname, probed, and toggled like apps.
 6. **Render** the whole config into one `dynConfig` tree and `yaml.Marshal`
    it (marshal — never string concatenation, so monitor-supplied strings

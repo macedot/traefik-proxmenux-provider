@@ -337,7 +337,6 @@ func BuildInfraRoutes(cfg *config.Config, host, apiIP string) []Route {
 	base := "http://" + apiIP + ":" + strconv.Itoa(port)
 	menux := []Route{
 		{Slug: "menux", Hostname: "menux." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
-		{Slug: "proxmenux", Hostname: "proxmenux." + cfg.Domain.Base, AppName: "ProxMenux", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "http", Port: port, Target: base},
 	}
 	pve := Route{Slug: host, Hostname: host + "." + cfg.Domain.Base, Domain: cfg.Domain.Base, AppName: "Proxmox VE", Kind: "infra", GuestName: host, IP: apiIP, Scheme: "https", Port: 8006, Insecure: true,
 		Target: "https://" + apiIP + ":8006"}

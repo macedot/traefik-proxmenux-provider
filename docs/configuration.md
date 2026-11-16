@@ -68,7 +68,7 @@ Full annotated example: [`config.example.yaml`](../config.example.yaml).
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`menux`, `proxmenux`) on the base domain; editable + toggleable like apps (keys `infra:<slug>`) |
+| `enabled` | `true` | static entries: PVE UI (`<host>`) + ProxMenux (`menux`) on the base domain; editable + toggleable like apps (keys `infra:<slug>`) |
 
 ## dashboard
 

@@ -288,14 +288,12 @@ func TestSidecarsAreReported(t *testing.T) {
 func TestBuildInfraRoutes(t *testing.T) {
 	cfg := base()
 	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.99")
-	if len(infra) != 3 {
-		t.Fatalf("infra routes = %d, want 3 (pve + menux + proxmenux)", len(infra))
+	if len(infra) != 2 {
+		t.Fatalf("infra routes = %d, want 2 (pve + menux)", len(infra))
 	}
 	want := map[string]string{
-		"pve-host.home.example.com":       "https://192.0.2.99:8006",
-		"pve-host.menux.home.example.com": "http://192.0.2.99:8008",
-		"menux.home.example.com":          "http://192.0.2.99:8008",
-		"proxmenux.home.example.com":      "http://192.0.2.99:8008",
+		"pve-host.home.example.com": "https://192.0.2.99:8006",
+		"menux.home.example.com":    "http://192.0.2.99:8008",
 	}
 	for _, r := range infra {
 		if want[r.Hostname] != r.Target {
@@ -374,8 +372,8 @@ func TestInfraToggle(t *testing.T) {
 	cfg := base()
 	cfg.Routing.Probe = false
 	infra := BuildInfraRoutes(cfg, "pve-host", "192.0.2.98")
-	if len(infra) != 3 {
-		t.Fatalf("infra routes = %d, want 3 (pve + menux + proxmenux)", len(infra))
+	if len(infra) != 2 {
+		t.Fatalf("infra routes = %d, want 2 (pve + menux)", len(infra))
 	}
 
 	// default_enabled=false: all infra disabled, keys present.
@@ -398,9 +396,9 @@ func TestInfraToggle(t *testing.T) {
 
 	// default_enabled=true + explicit disable.
 	cfg.Routing.DefaultEnabled = true
-	ApplyToggle(infra, map[string]bool{"infra:proxmenux": true}, nil, false, cfg)
+	ApplyToggle(infra, map[string]bool{"infra:pve-host": true}, nil, false, cfg)
 	for _, r := range infra {
-		wantOff := r.Slug == "proxmenux"
+		wantOff := r.Slug == "pve-host"
 		if r.Disabled != wantOff {
 			t.Fatalf("%s: disabled=%v want %v", r.Slug, r.Disabled, wantOff)
 		}
